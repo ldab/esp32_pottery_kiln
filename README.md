@@ -9,7 +9,7 @@ Connected electric kiln controller -> esp8266, max31855, thermocouple type K, re
 
  ## TODO
 
-- [ ] Restore data from cloud;
+- [X] Restore data from cloud;
 - [ ] Temperature Ramp rate monitor;
 - [ ] Cooling monitor;
 
@@ -51,7 +51,7 @@ Using Kanthal A1
 
 ### Surface Load
 
-* Accordingly to Kanthal [datasheet](./extras/Kanthal handbook.pdf), kiln application should have a Surface Load between 3-9 W/cm2:
+* Accordingly to Kanthal [datasheet](./extras/Kanthal%20handbook.pdf), kiln application should have a Surface Load between 3-9 W/cm2:
 
 `2300 / (2pi x 0.05 x 1300) = **5.88**W/cm2`
 
@@ -71,7 +71,7 @@ Using Kanthal A1
 
 ### Coil Pitch
 
-*Coil pitch is normally 2-4 times the wire diamter* [page_79](./extras/Kanthal handbook.pdf) -> aka 2-4mm
+*Coil pitch is normally 2-4 times the wire diameter* [page_79](./extras/Kanthal20handbook.pdf) -> aka 2-4mm
 
 `s = 7 x pi / sqrt((12500 / 2820) ^ 2 - 1) = **5.1mm**`
 

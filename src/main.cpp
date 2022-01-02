@@ -65,6 +65,8 @@ Distributed as-is; no warranty is given.
 
 #define RATEUPDATE 60  // every 60 seconds
 
+#define DIFFERENTIAL 5 // degC
+
 // Update these with values suitable for your network.
 const char *wifi_ssid = s_wifi_ssid;
 const char *wifi_password = s_wifi_password;
@@ -74,22 +76,11 @@ const char *mqtt_pass = s_mqtt_pass;
 uint16_t mqtt_port = s_mqtt_port;
 const char *blynk_auth = s_blynk_auth;
 
-/*
-{
-    "to": "email",
-    "state": "off",
-    "attributes": {
-        "friendly_name": "ESP_BANANA_moisture",
-        "device_class": "moisture"
-    }
-}
-*/
-
 float temp;
 float tInt;
-float currentSetpoint;
+float currentSetpoint = 0;
 volatile float instPower;
-volatile float energy;
+volatile float energy = 0;
 volatile float current;
 
 // Control variables
@@ -102,10 +93,7 @@ int step = 0;
 int controlTimer;
 int safetyTimer;
 int rampTimer;
-
-// initialize the MQTT Client
-WiFiClient espClient;
-bool published = false;
+int slowCool;
 
 Adafruit_MAX31855 thermocouple(PIN_SPI_SS);
 
@@ -120,8 +108,25 @@ BLYNK_CONNECTED() {
   String resetReason = ESP.getResetReason();
   uint32_t resetNumber = system_get_rst_info()->reason;
   DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
-  if (resetNumber != 0 && resetNumber != 4 && resetNumber != 6)
+  if (resetNumber != 0 && resetNumber != 4 && resetNumber != 6) {
+    // Restore data from the cloud
+    for (size_t i = 11; i < 15; i++) {
+      Blynk.syncVirtual(i);
+      for (size_t j = 10; j < 35; j += 10) {
+        Blynk.syncVirtual(i + j);
+      }
+    }
+
+    delay(250);
+    Blynk.syncVirtual(V3, V9, V50);
+    delay(250);
+
+    while (currentSetpoint == 0) delay(25);
+
+    Blynk.syncVirtual(V10);
+
     NOTIFY(resetReason.c_str());
+  }
   if (!timer.isEnabled(controlTimer)) {
     Blynk.virtualWrite(V5, 0);
     Blynk.virtualWrite(V10, 0);
@@ -149,6 +154,12 @@ BLYNK_WRITE(V14) { segments[3][0] = param.asInt(); }
 BLYNK_WRITE(V24) { segments[3][1] = param.asInt(); }
 BLYNK_WRITE(V34) { segments[3][2] = param.asInt() / 60; }
 
+// BLYNK_WRITE(V5) { segments[3][2] = param.asInt() / 60; } TODO initMillis to
+// UNIX
+BLYNK_WRITE(V3) { energy = param.asFloat(); }
+BLYNK_WRITE(V9) { currentSetpoint = param.asFloat(); }
+BLYNK_WRITE(V50) { step = param.asInt(); }
+
 BLYNK_WRITE(V10) {
   char tz[] = "Europe/Copenhagen";
   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
@@ -167,7 +178,7 @@ BLYNK_WRITE(V10) {
     }
   }
 
-  if (segments[3][0] < segments[2][0] || segments[2][0] < segments[1][0] ||
+  if (/*segments[3][0] < segments[2][0] ||*/ segments[2][0] < segments[1][0] ||
       segments[1][0] < segments[0][0]) {
     Blynk.virtualWrite(V10, LOW);
     Blynk.notify("Invalid Target temperature");
@@ -218,23 +229,14 @@ void sendData() {
   Blynk.virtualWrite(V4, String(energy * COSTKWH, 1) + "dkk");
   Blynk.virtualWrite(V8, String(tInt, 2));
   Blynk.virtualWrite(V9, String(currentSetpoint, 2));
+  Blynk.virtualWrite(V50, step);
   current = 0;
   instPower = 0;
   if (timer.isEnabled(controlTimer)) {
     Blynk.virtualWrite(V5, (int)((millis() - initMillis) / (60 * 1000)));
   }
 }
-/*
-float tInternal() {
-  // 10K NTC -> B 3977 with 10k R1 to 3.3V
-  uint16_t _b = 3977;
-  uint16_t _r = 10000;
-  float vNtc = (float)(analogRead(A0) * 3.3 / 1024);
-  float rNtc = vNtc / ((3.3 - vNtc) / 10000);
 
-  return (float)(1 / (1 / 298.15 + 1 / _b * log(rNtc / _r))) - 273.15;
-}
-*/
 void safetyCheck() {
   if (timer.isEnabled(controlTimer)) {
     if (temp > (currentSetpoint + 10))  // TODO check differential
@@ -268,86 +270,8 @@ void printSegments() {
   Serial.printf("\n");
 }
 
-/*
-void setup_wifi() {
-  delay(10);
-
-  char id[32];
-  sprintf(id, "%s-%s", DEVICE_NAME, WiFi.macAddress().c_str());
-  DBG("Device name is %s\n", id);
-
-  WiFi.onEvent(WiFiEvent);
-
-  if (WiFi.SSID() != wifi_ssid) {
-    DBG("Connecting to %s\n", wifi_ssid);
-
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);  // TODO maybe false as WiFI should start off
-
-    // int32_t wifi_channel = WiFi.channel();
-    // uint8_t wifi_bssid[6]; //{0xF8, 0xD1, 0x11, 0x24, 0xB3, 0x84};
-
-    // https://github.com/espressif/arduino-esp32/issues/2537
-    WiFi.config(
-        INADDR_NONE, INADDR_NONE,
-        INADDR_NONE);  // call is only a workaround for bug in WiFi class
-
-    // WiFi.begin(wifi_ssid, wifi_password, wifi_channel, wifi_bssid);
-    WiFi.begin(wifi_ssid, wifi_password);
-
-    WiFi.setHostname(id);
-
-    WiFi.persistent(true);  // TODO maybe false as WiFI should start off
-  }
-
-  while (millis() < 10000)  // TODO
-  {
-    int8_t wifi_result = WiFi.waitForConnectResult();
-    if (wifi_result == WL_CONNECTED) break;
-    DBG(".");
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    randomSeed(micros());
-
-    mqttClient.setServer(mqtt_server, mqtt_port);
-    mqttClient.setCredentials(mqtt_user, mqtt_pass);
-    mqttClient.setClientId(id);
-    DBG("Connecting to MQTT Server %s\n", mqtt_server);
-    mqttClient.connect();
-  } else {
-    DBG(" WiFi connect failed: %d\n", WiFi.status());
-    play(BUZZER_CHANNEL, Urgent, sizeof(Urgent) / sizeof(char *));
-    esp_deep_sleep(360000000L);
-  }
-
-  while (!mqttClient.connected() && millis() < 10000) {
-    delay(50);
-  }
-  if (!mqttClient.connected()) {
-    DBG(" MQTT connect failed: %d\n", WiFi.status());
-    play(BUZZER_CHANNEL, Urgent, sizeof(Urgent) / sizeof(char *));
-    esp_deep_sleep(360000000L);
-  }
-}
-*/
-
-void inline static beep() {
-  analogWrite(BUZZER, 123);
-
-  delay(42);
-
-  analogWrite(BUZZER, 0);
-}
-
-void static chirp(uint8_t times) {
-  while (times-- > 0) {
-    beep();
-    delay(40);
-  }
-}
-
 ICACHE_RAM_ATTR void readPower() {
-  if (energyMillis == 0) {
+  if (energy == 0) {
     // We don't know the time difference between pulse, reset
     // TODO get from cloud in case MCU reset
     energy = 1 / 1000.0f;
@@ -435,19 +359,24 @@ void holdTimer(uint32_t _segment) {
 
 void tControl() {
   DBG("Control ST: %.01fdegC, step: %d\n", currentSetpoint, step);
+  static uint8_t diff;
+
   if (!isnan(temp)) {
     // TODO Differential
-    float delta_t = currentSetpoint - temp;
+    float delta_t = currentSetpoint - temp - diff;
     if (delta_t >= 0) {
       if (!digitalRead(RELAY)) {
         digitalWrite(RELAY, HIGH);
         led.on();
         timer.restartTimer(safetyTimer);
+        diff = 0;
       }
     } else if (digitalRead(RELAY)) {
       digitalWrite(RELAY, LOW);
       led.off();
+      diff = DIFFERENTIAL;
     }
+    if (step == 5) return;
     if (temp > segments[step][0]) {
       currentSetpoint = segments[step][0];
 
@@ -455,11 +384,13 @@ void tControl() {
       holdTimer(segments[step][2]);
 
       if (step == 4) {
-        timer.disable(controlTimer);
         uint8_t h = (millis() - initMillis) / (1000 * 3600);
         uint8_t m = ((millis() - initMillis) - (h * 3600 * 1000)) / (60 * 1000);
         NOTIFY("Reached Temp, after: %d:%d", h, m);
-        Blynk.virtualWrite(V7, "Cooling ❄️");
+        Blynk.virtualWrite(V7, "Slow Cooling ❄️");
+        timer.enable(slowCool);
+        timer.disable(rampTimer);
+        step++;
       }
     }
   }
@@ -478,6 +409,19 @@ void rampRate() {
   }
 
   DBG("Current Setpoint: %.02fdegC, step: %d\n", currentSetpoint, step);
+}
+
+void rampDown() {
+  // https://digitalfire.com/schedule/04dsdh
+  if (currentSetpoint < 760) {
+    timer.disable(controlTimer);
+    timer.disable(slowCool);
+    currentSetpoint = 0;
+    tControl();
+    Blynk.virtualWrite(V7, "Cooling ❄️");
+  }
+
+  currentSetpoint -= (float)(83.0 / (3600.0f / RATEUPDATE));
 }
 
 void pinInit() {
@@ -566,6 +510,9 @@ void setup() {
 
   rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
   timer.disable(rampTimer);  // enable it after button is pressed
+
+  slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
+  timer.disable(slowCool);
 }
 
 void loop() {
