@@ -230,6 +230,7 @@ void sendData() {
   Blynk.virtualWrite(V8, String(tInt, 2));
   Blynk.virtualWrite(V9, String(currentSetpoint, 2));
   Blynk.virtualWrite(V50, step);
+  Blynk.virtualWrite(V51, WiFi.RSSI());
   current = 0;
   instPower = 0;
   if (timer.isEnabled(controlTimer)) {
