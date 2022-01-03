@@ -35,8 +35,10 @@ Distributed as-is; no warranty is given.
 #endif
 
 #ifdef VERBOSE
-#define DBG(msg, ...) \
-  { Serial.printf("[%lu] " msg, millis(), ##__VA_ARGS__); }
+#define DBG(msg, ...)                                     \
+  {                                                       \
+    Serial.printf("[%lu] " msg, millis(), ##__VA_ARGS__); \
+  }
 #else
 #define DBG(...)
 #endif
@@ -50,31 +52,31 @@ Distributed as-is; no warranty is given.
   }
 
 // https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
-#define BUZZER D0  // GPIO12
-#define RELAY D1   // GPIO5
-#define POWER D2   // GPIO4
+#define BUZZER         D0 // GPIO12
+#define RELAY          D1 // GPIO5
+#define POWER          D2 // GPIO4
 
 #define BUZZER_CHANNEL 1
 
 // Heating Rate (°C/hr) during the last 100°C of Firing
-#define SLOWFIRE 15
-#define MEDIUMFIRE 60
-#define FASTFIRE 150
+#define SLOWFIRE       15
+#define MEDIUMFIRE     60
+#define FASTFIRE       150
 
-#define COSTKWH 2.14
+#define COSTKWH        2.14
 
-#define RATEUPDATE 60  // every 60 seconds
+#define RATEUPDATE     60 // every 60 seconds
 
-#define DIFFERENTIAL 5 // degC
+#define DIFFERENTIAL   5 // degC
 
 // Update these with values suitable for your network.
-const char *wifi_ssid = s_wifi_ssid;
+const char *wifi_ssid     = s_wifi_ssid;
 const char *wifi_password = s_wifi_password;
-const char *mqtt_server = s_mqtt_server;
-const char *mqtt_user = s_mqtt_user;
-const char *mqtt_pass = s_mqtt_pass;
-uint16_t mqtt_port = s_mqtt_port;
-const char *blynk_auth = s_blynk_auth;
+const char *mqtt_server   = s_mqtt_server;
+const char *mqtt_user     = s_mqtt_user;
+const char *mqtt_pass     = s_mqtt_pass;
+uint16_t mqtt_port        = s_mqtt_port;
+const char *blynk_auth    = s_blynk_auth;
 
 float temp;
 float tInt;
@@ -85,9 +87,9 @@ volatile float current;
 
 // Control variables
 volatile uint32_t energyMillis = 0;
-uint32_t initMillis = 0;
-uint32_t holdMillis = 0;
-int step = 0;
+uint32_t initMillis            = 0;
+uint32_t holdMillis            = 0;
+int step                       = 0;
 
 // Timer instance numbers
 int controlTimer;
@@ -104,8 +106,9 @@ WidgetLED led(V6);
 void printSegments();
 void rampRate();
 
-BLYNK_CONNECTED() {
-  String resetReason = ESP.getResetReason();
+BLYNK_CONNECTED()
+{
+  String resetReason   = ESP.getResetReason();
   uint32_t resetNumber = system_get_rst_info()->reason;
   DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
   if (resetNumber != 0 && resetNumber != 4 && resetNumber != 6) {
@@ -121,7 +124,8 @@ BLYNK_CONNECTED() {
     Blynk.syncVirtual(V3, V9, V50);
     delay(250);
 
-    while (currentSetpoint == 0) delay(25);
+    while (currentSetpoint == 0)
+      delay(25);
 
     Blynk.syncVirtual(V10);
 
@@ -160,7 +164,8 @@ BLYNK_WRITE(V3) { energy = param.asFloat(); }
 BLYNK_WRITE(V9) { currentSetpoint = param.asFloat(); }
 BLYNK_WRITE(V50) { step = param.asInt(); }
 
-BLYNK_WRITE(V10) {
+BLYNK_WRITE(V10)
+{
   char tz[] = "Europe/Copenhagen";
   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
     if (!segments[i][2])
@@ -213,15 +218,16 @@ BLYNK_WRITE(V10) {
     Blynk.virtualWrite(V7, "Idle 💤");
     // ESP.restart();
     digitalWrite(RELAY, LOW);
-    step = 0;
-    holdMillis = 0;
+    step            = 0;
+    holdMillis      = 0;
     currentSetpoint = 0;
     timer.disable(controlTimer);
     timer.disable(rampTimer);
   }
 }
 
-void sendData() {
+void sendData()
+{
   Blynk.virtualWrite(V0, String(temp, 2));
   Blynk.virtualWrite(V1, String(current, 1));
   Blynk.virtualWrite(V2, String(instPower, 0) + "W");
@@ -231,16 +237,17 @@ void sendData() {
   Blynk.virtualWrite(V9, String(currentSetpoint, 2));
   Blynk.virtualWrite(V50, step);
   Blynk.virtualWrite(V51, WiFi.RSSI());
-  current = 0;
+  current   = 0;
   instPower = 0;
   if (timer.isEnabled(controlTimer)) {
     Blynk.virtualWrite(V5, (int)((millis() - initMillis) / (60 * 1000)));
   }
 }
 
-void safetyCheck() {
+void safetyCheck()
+{
   if (timer.isEnabled(controlTimer)) {
-    if (temp > (currentSetpoint + 10))  // TODO check differential
+    if (temp > (currentSetpoint + 10)) // TODO check differential
     {
       DBG("HIGH TEMPERATURE ALARM\n");
     } else if (temp < (currentSetpoint - 20)) {
@@ -259,7 +266,8 @@ void safetyCheck() {
   }
 }
 
-void printSegments() {
+void printSegments()
+{
   DBG("Firing ");
   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
     Serial.printf("{");
@@ -271,26 +279,27 @@ void printSegments() {
   Serial.printf("\n");
 }
 
-ICACHE_RAM_ATTR void readPower() {
+ICACHE_RAM_ATTR void readPower()
+{
   if (energy == 0) {
     // We don't know the time difference between pulse, reset
     // TODO get from cloud in case MCU reset
-    energy = 1 / 1000.0f;
-    current = 0;
-    instPower = 0;
+    energy       = 1 / 1000.0f;
+    current      = 0;
+    instPower    = 0;
 
     energyMillis = millis();
   } else {
     volatile uint32_t pulseInterval = millis() - energyMillis;
 
-    if (pulseInterval < 100) {  // 10*sqrt(2) Amps =~ 1106.8ms
+    if (pulseInterval < 100) { // 10*sqrt(2) Amps =~ 1106.8ms
       // DBG("DEBOUNCE");
       return;
     }
 
-    energy += 1 / 1000.0f;                           // each pulse is 1Wh
-    instPower = (3600) / (pulseInterval / 1000.0f);  // 1Wh = 3600J
-    current = instPower / 230.0f;
+    energy += 1 / 1000.0f;                             // each pulse is 1Wh
+    instPower    = (3600) / (pulseInterval / 1000.0f); // 1Wh = 3600J
+    current      = instPower / 230.0f;
 
     energyMillis = millis();
   }
@@ -310,21 +319,22 @@ ICACHE_RAM_ATTR void readPower() {
       energy);
 }
 
-void getTemp() {
-  static float _t = 0;
+void getTemp()
+{
+  static float _t   = 0;
   static uint8_t _s = 0;
 
-  temp = thermocouple.readCelsius();
-  tInt = thermocouple.readInternal();
-  uint8_t error = thermocouple.readError();
+  temp              = thermocouple.readCelsius();
+  tInt              = thermocouple.readInternal();
+  uint8_t error     = thermocouple.readError();
 
   // average 5x samples
   _t += temp;
   _s++;
   if (_s == 4) {
     temp = (float)(_t / _s);
-    _t = 0;
-    _s = 0;
+    _t   = 0;
+    _s   = 0;
   }
 
   // Ignore SCG fault
@@ -339,7 +349,8 @@ void getTemp() {
   }
 }
 
-void holdTimer(uint32_t _segment) {
+void holdTimer(uint32_t _segment)
+{
   if (holdMillis == 0) {
     DBG("Start hold for %dmin\n", _segment);
     holdMillis = millis();
@@ -358,7 +369,8 @@ void holdTimer(uint32_t _segment) {
   }
 }
 
-void tControl() {
+void tControl()
+{
   DBG("Control ST: %.01fdegC, step: %d\n", currentSetpoint, step);
   static uint8_t diff;
 
@@ -377,11 +389,13 @@ void tControl() {
       led.off();
       diff = DIFFERENTIAL;
     }
-    if (step == 5) return;
+    if (step == 5)
+      return;
     if (temp > segments[step][0]) {
       currentSetpoint = segments[step][0];
 
-      if (segments[step][2] == -1) segments[step][2] = 0;
+      if (segments[step][2] == -1)
+        segments[step][2] = 0;
       holdTimer(segments[step][2]);
 
       if (step == 4) {
@@ -397,10 +411,12 @@ void tControl() {
   }
 }
 
-void rampRate() {
+void rampRate()
+{
   // http://www.stoneware.net/stoneware/glasyrer/firing.htm
 
-  if (currentSetpoint == 0) currentSetpoint = temp;
+  if (currentSetpoint == 0)
+    currentSetpoint = temp;
 
   if (currentSetpoint >= segments[step][0]) {
     // TODO alarm if takes too long
@@ -412,7 +428,8 @@ void rampRate() {
   DBG("Current Setpoint: %.02fdegC, step: %d\n", currentSetpoint, step);
 }
 
-void rampDown() {
+void rampDown()
+{
   // https://digitalfire.com/schedule/04dsdh
   if (currentSetpoint < 760) {
     timer.disable(controlTimer);
@@ -425,7 +442,8 @@ void rampDown() {
   currentSetpoint -= (float)(83.0 / (3600.0f / RATEUPDATE));
 }
 
-void pinInit() {
+void pinInit()
+{
   pinMode(POWER, INPUT);
   attachInterrupt(digitalPinToInterrupt(POWER), readPower, RISING);
 
@@ -435,14 +453,15 @@ void pinInit() {
   pinMode(BUZZER, OUTPUT);
 }
 
-void otaInit() {
+void otaInit()
+{
   ArduinoOTA.setHostname("kiln");
 
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH) {
       type = "sketch";
-    } else {  // U_FS
+    } else { // U_FS
       type = "filesystem";
     }
 
@@ -471,7 +490,8 @@ void otaInit() {
   ArduinoOTA.begin();
 }
 
-void setup() {
+void setup()
+{
 #ifdef VERBOSE
   Serial.begin(115200);
   DBG("VERSION %s\n", VERSION);
@@ -504,19 +524,20 @@ void setup() {
   timer.setInterval(2000L, getTemp);
   timer.setInterval(10000L, sendData);
 
-  safetyTimer = timer.setInterval(2115L, safetyCheck);  // 2100ms =~ 7.5A
+  safetyTimer  = timer.setInterval(2115L, safetyCheck); // 2100ms =~ 7.5A
 
   controlTimer = timer.setInterval(5530L, tControl);
-  timer.disable(controlTimer);  // enable it after button is pressed
+  timer.disable(controlTimer); // enable it after button is pressed
 
   rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
-  timer.disable(rampTimer);  // enable it after button is pressed
+  timer.disable(rampTimer); // enable it after button is pressed
 
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
 }
 
-void loop() {
+void loop()
+{
   ArduinoOTA.handle();
   Blynk.run();
   timer.run();
