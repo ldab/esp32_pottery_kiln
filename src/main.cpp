@@ -279,7 +279,7 @@ void printSegments()
   Serial.printf("\n");
 }
 
-ICACHE_RAM_ATTR void readPower()
+IRAM_ATTR void readPower()
 {
   if (energy == 0) {
     // We don't know the time difference between pulse, reset
@@ -494,7 +494,7 @@ void setup()
 {
 #ifdef VERBOSE
   Serial.begin(115200);
-  DBG("VERSION %s\n", VERSION);
+  DBG("VERSION %s\n", BLYNK_FIRMWARE_VERSION);
 #endif
 
 #ifdef CALIBRATE
