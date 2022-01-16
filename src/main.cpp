@@ -434,6 +434,9 @@ void tControl()
     //   diff = DIFFERENTIAL;
     // }
 
+    if (pid_out < 60)
+      timer.restartTimer(safetyTimer);
+
     pid_out = calculatePid(temp, currentSetpoint, 1.2, 0.2, 1);
     analogWrite(RELAY, pid_out);
     led.setValue(pid_out);
@@ -573,7 +576,7 @@ void setup()
   timer.setInterval(750L, getTemp);
   timer.setInterval(10000L, sendData);
 
-  safetyTimer  = timer.setInterval(2115L, safetyCheck); // 2100ms =~ 7.5A
+  safetyTimer  = timer.setInterval(6670L, safetyCheck); // 6666ms =~ 9W
 
   controlTimer = timer.setInterval(1000L, tControl);
   timer.disable(controlTimer); // enable it after button is pressed
