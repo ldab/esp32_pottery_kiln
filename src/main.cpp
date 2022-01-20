@@ -9,12 +9,16 @@ Distributed as-is; no warranty is given.
 
 #include <Arduino.h>
 
-#define BLYNK_PRINT Serial
+// #define BLYNK_PRINT Serial
 
 // Blynk and WiFi
 #include <BlynkSimpleEsp8266.h>
 #include <ESP8266WiFi.h>
 #include <TimeLib.h>
+
+// PapertrailLogger
+#include "PapertrailLogger.h"
+#include <WiFiUdp.h>
 
 // OTA
 #include <ArduinoOTA.h>
@@ -108,6 +112,8 @@ Adafruit_MAX31855 thermocouple(PIN_SPI_SS);
 BlynkTimer timer;
 
 WidgetLED led(V6);
+
+PapertrailLogger *errorLog;
 
 void printSegments();
 void rampRate();
@@ -586,6 +592,11 @@ void setup()
 
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
+
+  errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
+  String resetReason   = ESP.getResetReason();
+  uint32_t resetNumber = system_get_rst_info()->reason;
+  errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
 }
 
 void loop()
