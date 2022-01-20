@@ -9,12 +9,16 @@ Distributed as-is; no warranty is given.
 
 #include <Arduino.h>
 
-#define BLYNK_PRINT Serial
+// #define BLYNK_PRINT Serial
 
 // Blynk and WiFi
 #include <BlynkSimpleEsp8266.h>
 #include <ESP8266WiFi.h>
 #include <TimeLib.h>
+
+// PapertrailLogger
+#include "PapertrailLogger.h"
+#include <WiFiUdp.h>
 
 // OTA
 #include <ArduinoOTA.h>
@@ -69,9 +73,6 @@ Distributed as-is; no warranty is given.
 
 #define DIFFERENTIAL   5 // degC
 
-#define PWM_RANGE      255
-#define PWM_FREQ       10
-
 // Update these with values suitable for your network.
 const char *wifi_ssid     = s_wifi_ssid;
 const char *wifi_password = s_wifi_password;
@@ -100,14 +101,13 @@ int safetyTimer;
 int rampTimer;
 int slowCool;
 
-// PID output
-uint16_t pid_out;
-
 Adafruit_MAX31855 thermocouple(PIN_SPI_SS);
 
 BlynkTimer timer;
 
 WidgetLED led(V6);
+
+PapertrailLogger *errorLog;
 
 void printSegments();
 void rampRate();
@@ -223,13 +223,12 @@ BLYNK_WRITE(V10)
     DBG("Button pressed, disable temp control\n");
     Blynk.virtualWrite(V7, "Idle 💤");
     // ESP.restart();
-    pid_out         = 0;
+    digitalWrite(RELAY, LOW);
     step            = 0;
     holdMillis      = 0;
     currentSetpoint = 0;
     timer.disable(controlTimer);
     timer.disable(rampTimer);
-    analogWrite(RELAY, pid_out);
   }
 }
 
@@ -251,40 +250,6 @@ void sendData()
   }
 }
 
-uint16_t calculatePid(float input, float setpoint, float kp, float ki, float kd)
-{
-  static float _lastErr = 0;
-  static float errSum   = 0;
-  static float _last    = millis() - 1000; // avoid zero division
-  uint32_t _now         = millis();
-  float deltaT          = (_now - _last) / 1000.0;
-  float _error          = setpoint - input;
-  float deltaErr        = (_error - _lastErr);
-
-  errSum += (_error * deltaT);
-
-  // TODO limit integral part
-  if (errSum > PWM_RANGE)
-    errSum = PWM_RANGE;
-  else if (errSum < 0)
-    errSum = 0;
-
-  /*Compute PID Output*/
-  int32_t _out = kp * _error + ki * errSum + kd * deltaErr / deltaT;
-  Blynk.virtualWrite(V52, _out);
-
-  /*Remember some variables for next time*/
-  _lastErr = _error;
-  _last    = _now;
-
-  if (_out > PWM_RANGE)
-    _out = PWM_RANGE;
-  else if (_out < 0)
-    _out = 0;
-
-  return _out;
-}
-
 void safetyCheck()
 {
   if (timer.isEnabled(controlTimer)) {
@@ -300,12 +265,9 @@ void safetyCheck()
     NOTIFY("High internal temp: %.1f°C", tInt);
   }
 
-  // energyMillis in order to avoid notify when relay is not on at start
-  if (pid_out && energyMillis) {
-    float proportionalPower = 10.0 * 230 * pid_out / 255;
-    uint32_t delta_t        = 3600 * 1000 / proportionalPower;
-    if ((millis() - energyMillis) > delta_t * 1.1) {
-      NOTIFY("PROBLEM %.1fW expect 1 pulse every ~%dms\n", proportionalPower, delta_t);
+  if (digitalRead(RELAY)) {
+    if ((millis() - energyMillis) > 2000L) {
+      NOTIFY("PROBLEM 2300W expect 1 pulse every ~1565ms\n");
     }
   }
 }
@@ -349,7 +311,7 @@ IRAM_ATTR void readPower()
   }
 
   volatile static bool problem = false;
-  if (pid_out == 0) {
+  if (!digitalRead(RELAY)) {
     if (problem == true) {
       NOTIFY("PROBLEM, current but relay is Off, I = %.1fA P = %.1fW", current,
              instPower);
@@ -387,8 +349,7 @@ void getTemp()
     temp = NAN;
     NOTIFY("Thermocouple error #%i", error);
 
-    analogWrite(RELAY, LOW);
-    pid_out = 0;
+    digitalWrite(RELAY, LOW);
   } else {
     DBG("T: %.02fdegC\n", temp);
   }
@@ -417,30 +378,23 @@ void holdTimer(uint32_t _segment)
 void tControl()
 {
   DBG("Control ST: %.01fdegC, step: %d\n", currentSetpoint, step);
-  // static uint8_t diff;
+  static uint8_t diff;
 
   if (!isnan(temp)) {
-    // float delta_t = currentSetpoint - temp - diff;
-    // if (delta_t >= 0) {
-    //   if (!digitalRead(RELAY)) {
-    //     digitalWrite(RELAY, HIGH);
-    //     led.on();
-    //     timer.restartTimer(safetyTimer);
-    //     diff = 0;
-    //   }
-    // } else if (digitalRead(RELAY)) {
-    //   digitalWrite(RELAY, LOW);
-    //   led.off();
-    //   diff = DIFFERENTIAL;
-    // }
-
-    if (pid_out < 60)
-      timer.restartTimer(safetyTimer);
-
-    pid_out = calculatePid(temp, currentSetpoint, 1.2, 0.2, 1);
-    analogWrite(RELAY, pid_out);
-    led.setValue(pid_out);
-
+    // TODO Differential
+    float delta_t = currentSetpoint - temp - diff;
+    if (delta_t >= 0) {
+      if (!digitalRead(RELAY)) {
+        digitalWrite(RELAY, HIGH);
+        led.on();
+        timer.restartTimer(safetyTimer);
+        diff = 0;
+      }
+    } else if (digitalRead(RELAY)) {
+      digitalWrite(RELAY, LOW);
+      led.off();
+      diff = DIFFERENTIAL;
+    }
     if (step == 5)
       return;
     if (temp > segments[step][0]) {
@@ -500,9 +454,9 @@ void pinInit()
   attachInterrupt(digitalPinToInterrupt(POWER), readPower, RISING);
 
   pinMode(RELAY, OUTPUT);
-  // analogWriteFreq(PWM_FREQ);
-  analogWriteRange(PWM_RANGE);
-  analogWrite(RELAY, LOW);
+  digitalWrite(RELAY, LOW);
+
+  pinMode(BUZZER, OUTPUT);
 }
 
 void otaInit()
@@ -573,12 +527,12 @@ void setup()
 
   otaInit();
 
-  timer.setInterval(750L, getTemp);
+  timer.setInterval(2000L, getTemp);
   timer.setInterval(10000L, sendData);
 
-  safetyTimer  = timer.setInterval(6670L, safetyCheck); // 6666ms =~ 9W
+  safetyTimer  = timer.setInterval(2115L, safetyCheck); // 2100ms =~ 7.5A
 
-  controlTimer = timer.setInterval(1000L, tControl);
+  controlTimer = timer.setInterval(5530L, tControl);
   timer.disable(controlTimer); // enable it after button is pressed
 
   rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
@@ -586,6 +540,11 @@ void setup()
 
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
+
+  errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
+  String resetReason   = ESP.getResetReason();
+  uint32_t resetNumber = system_get_rst_info()->reason;
+  errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
 }
 
 void loop()
