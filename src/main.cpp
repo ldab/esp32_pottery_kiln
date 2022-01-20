@@ -73,6 +73,9 @@ Distributed as-is; no warranty is given.
 
 #define DIFFERENTIAL   5 // degC
 
+#define BURST_PERIOD   1000
+#define BURST_RESOLUT  10
+
 // Update these with values suitable for your network.
 const char *wifi_ssid     = s_wifi_ssid;
 const char *wifi_password = s_wifi_password;
@@ -94,6 +97,7 @@ volatile uint32_t energyMillis = 0;
 uint32_t initMillis            = 0;
 uint32_t holdMillis            = 0;
 int step                       = 0;
+uint8_t pid_out                = 0;
 
 // Timer instance numbers
 int controlTimer;
@@ -265,9 +269,11 @@ void safetyCheck()
     NOTIFY("High internal temp: %.1f°C", tInt);
   }
 
-  if (digitalRead(RELAY)) {
-    if ((millis() - energyMillis) > 2000L) {
-      NOTIFY("PROBLEM 2300W expect 1 pulse every ~1565ms\n");
+  if (pid_out && energyMillis) {
+    float proportionalPower = 10.0 * 230 * pid_out / 10;
+    uint32_t delta_t        = 3600 * 1000 / proportionalPower;
+    if ((millis() - energyMillis) > delta_t * 1.1) {
+      NOTIFY("PROBLEM %.1fW expect 1 pulse every ~%dms\n", proportionalPower, delta_t);
     }
   }
 }
@@ -325,6 +331,48 @@ IRAM_ATTR void readPower()
       energy);
 }
 
+uint16_t calculatePid(float input, float setpoint, float kp, float ki, float kd)
+{
+  static float _lastErr = 0;
+  static float errSum   = 0;
+  static float _last    = millis() - 1000; // avoid zero division
+  uint32_t _now         = millis();
+  float deltaT          = (_now - _last) / 1000.0;
+  float _error          = setpoint - input;
+  float deltaErr        = (_error - _lastErr);
+
+  errSum += (_error * deltaT);
+
+  // TODO limit integral part
+  if (errSum > BURST_RESOLUT)
+    errSum = BURST_RESOLUT;
+  else if (errSum < 0)
+    errSum = 0;
+
+  /*Compute PID Output*/
+  int32_t _out = kp * _error + ki * errSum + kd * deltaErr / deltaT;
+
+  /*Remember some variables for next time*/
+  _lastErr     = _error;
+  _last        = _now;
+
+  if (_out > BURST_RESOLUT)
+    _out = BURST_RESOLUT;
+  else if (_out < 0)
+    _out = 0;
+
+  DBG("PID output: %d%\n", _out);
+  Blynk.virtualWrite(V52, _out);
+
+  return _out;
+}
+
+void burstFire(void)
+{
+  digitalWrite(RELAY, pid_out);
+  pid_out = pid_out <= 0 ? 0 : pid_out - 1;
+}
+
 void getTemp()
 {
   static float _t   = 0;
@@ -378,23 +426,33 @@ void holdTimer(uint32_t _segment)
 void tControl()
 {
   DBG("Control ST: %.01fdegC, step: %d\n", currentSetpoint, step);
-  static uint8_t diff;
+  // static uint8_t diff;
 
   if (!isnan(temp)) {
-    // TODO Differential
-    float delta_t = currentSetpoint - temp - diff;
-    if (delta_t >= 0) {
-      if (!digitalRead(RELAY)) {
-        digitalWrite(RELAY, HIGH);
-        led.on();
-        timer.restartTimer(safetyTimer);
-        diff = 0;
-      }
-    } else if (digitalRead(RELAY)) {
-      digitalWrite(RELAY, LOW);
-      led.off();
-      diff = DIFFERENTIAL;
-    }
+    // float delta_t = currentSetpoint - temp - diff;
+    // if (delta_t >= 0) {
+    //   if (!digitalRead(RELAY)) {
+    //     digitalWrite(RELAY, HIGH);
+    //     led.on();
+    //     timer.restartTimer(safetyTimer);
+    //     diff = 0;
+    //   }
+    // } else if (digitalRead(RELAY)) {
+    //   digitalWrite(RELAY, LOW);
+    //   led.off();
+    //   diff = DIFFERENTIAL;
+    // }
+
+    pid_out = calculatePid(temp, currentSetpoint, 0.4, 0.1, 0);
+    burstFire();
+    timer.setTimer(BURST_PERIOD * BURST_RESOLUT, burstFire, BURST_RESOLUT - 1);
+
+    float proportionalPower = 10.0 * 230 * pid_out / 10;
+    uint32_t delta_t        = 3600 * 1000 / proportionalPower + 1000;
+
+    timer.changeInterval(safetyTimer, delta_t);
+    led.setValue((uint16_t)(pid_out * 25.5));
+
     if (step == 5)
       return;
     if (temp > segments[step][0]) {
@@ -527,12 +585,12 @@ void setup()
 
   otaInit();
 
-  timer.setInterval(2000L, getTemp);
+  timer.setInterval(1970L, getTemp);
   timer.setInterval(10000L, sendData);
 
   safetyTimer  = timer.setInterval(2115L, safetyCheck); // 2100ms =~ 7.5A
 
-  controlTimer = timer.setInterval(5530L, tControl);
+  controlTimer = timer.setInterval(BURST_PERIOD * BURST_RESOLUT, tControl);
   timer.disable(controlTimer); // enable it after button is pressed
 
   rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
