@@ -73,7 +73,7 @@ Distributed as-is; no warranty is given.
 
 #define DIFFERENTIAL   5 // degC
 
-#define BURST_PERIOD   1000
+#define BURST_PERIOD   1400 // 3600J / 2530W
 #define BURST_RESOLUT  10
 
 // Update these with values suitable for your network.
@@ -369,7 +369,7 @@ uint16_t calculatePid(float input, float setpoint, float kp, float ki, float kd)
 
 void burstFire(void)
 {
-  digitalWrite(RELAY, pid_out);
+  digitalWrite(RELAY, pid_out && 0b1);
   pid_out = pid_out <= 0 ? 0 : pid_out - 1;
 }
 
@@ -443,14 +443,21 @@ void tControl()
     //   diff = DIFFERENTIAL;
     // }
 
-    pid_out = calculatePid(temp, currentSetpoint, 0.4, 0.1, 0);
+    if (currentSetpoint < 500)
+      pid_out = calculatePid(temp, currentSetpoint, 0.4, 0.2, 0);
+    else
+      pid_out = calculatePid(temp, currentSetpoint, 0.6, 0, 0);
+
     burstFire();
-    timer.setTimer(BURST_PERIOD * BURST_RESOLUT, burstFire, BURST_RESOLUT - 1);
+    timer.setTimer(BURST_PERIOD / BURST_RESOLUT, burstFire, BURST_RESOLUT - 1);
 
-    float proportionalPower = 10.0 * 230 * pid_out / 10;
-    uint32_t delta_t        = 3600 * 1000 / proportionalPower + 1000;
+    if (pid_out > 0) {
+      float proportionalPower = 10.0 * 230 * pid_out / BURST_RESOLUT;
+      uint32_t delta_t        = 3600 * 1000 / proportionalPower + 1000;
 
-    timer.changeInterval(safetyTimer, delta_t);
+      timer.changeInterval(safetyTimer, delta_t);
+    }
+
     led.setValue((uint16_t)(pid_out * 25.5));
 
     if (step == 5)
@@ -590,7 +597,7 @@ void setup()
 
   safetyTimer  = timer.setInterval(2115L, safetyCheck); // 2100ms =~ 7.5A
 
-  controlTimer = timer.setInterval(BURST_PERIOD * BURST_RESOLUT, tControl);
+  controlTimer = timer.setInterval(BURST_PERIOD, tControl);
   timer.disable(controlTimer); // enable it after button is pressed
 
   rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
