@@ -38,10 +38,15 @@ Distributed as-is; no warranty is given.
 #error Remember to set the email address
 #endif
 
+PapertrailLogger errorLog(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "kiln", "errorLog");
+PapertrailLogger debugLog(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Debug, "\033[0;32m", "kiln", "debugLog");
+
 #ifdef VERBOSE
 #define DBG(msg, ...)                                     \
   {                                                       \
-    Serial.printf("[%lu] " msg, millis(), ##__VA_ARGS__); \
+    char _msg[64] = "";                                   \
+    sprintf(_msg, "[%lu] " msg, millis(), ##__VA_ARGS__); \
+    Serial.printf(_msg);                                  \
   }
 #else
 #define DBG(...)
@@ -110,8 +115,6 @@ Adafruit_MAX31855 thermocouple(PIN_SPI_SS);
 BlynkTimer timer;
 
 WidgetLED led(V6);
-
-PapertrailLogger *errorLog;
 
 void printSegments();
 void rampRate();
@@ -317,7 +320,7 @@ IRAM_ATTR void readPower()
   }
 
   volatile static bool problem = false;
-  if (!digitalRead(RELAY)) {
+  if (!digitalRead(RELAY) && current > 5) {
     if (problem == true) {
       NOTIFY("PROBLEM, current but relay is Off, I = %.1fA P = %.1fW", current,
              instPower);
@@ -446,7 +449,7 @@ void tControl()
     if (currentSetpoint < 500)
       pid_out = calculatePid(temp, currentSetpoint, 0.4, 0.2, 0);
     else
-      pid_out = calculatePid(temp, currentSetpoint, 0.6, 0, 0);
+      pid_out = calculatePid(temp, currentSetpoint, 2.5, 0.2, 0);
 
     burstFire();
     timer.setTimer(BURST_PERIOD / BURST_RESOLUT, burstFire, BURST_RESOLUT - 1);
@@ -606,10 +609,14 @@ void setup()
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
 
-  errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
-  String resetReason   = ESP.getResetReason();
-  uint32_t resetNumber = system_get_rst_info()->reason;
-  errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+  struct rst_info *rtc_info = system_get_rst_info();
+  errorLog.printf("reset reason: %x\n", rtc_info->reason);
+  if (rtc_info->reason == REASON_WDT_RST || rtc_info->reason == REASON_EXCEPTION_RST || rtc_info->reason == REASON_SOFT_WDT_RST) {
+    if (rtc_info->reason == REASON_EXCEPTION_RST) {
+      errorLog.printf("Fatal exception (%d):\n", rtc_info->exccause);
+    }
+    errorLog.printf("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc = 0x % 08x\n ", rtc_info->epc1, rtc_info->epc2, rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc); // The address of the last crash is printed, which is used to debug garbled output.
+  }
 }
 
 void loop()
