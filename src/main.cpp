@@ -51,7 +51,7 @@ Distributed as-is; no warranty is given.
   {                                    \
     char _msg[64] = "";                \
     sprintf(_msg, msg, ##__VA_ARGS__); \
-    Blynk.notify(_msg);                \
+    Blynk.logEvent("alarm", _msg);                \
     DBG("%s\n", _msg);                 \
   }
 
@@ -183,7 +183,7 @@ BLYNK_WRITE(V10)
       Blynk.virtualWrite(11 + i * 1 + j * 10, segments[i][j]);
       if (segments[i][j] == 0) {
         Blynk.virtualWrite(V10, LOW);
-        Blynk.notify("Check the settings, i: " + String(i) + " j:" + String(j));
+        Blynk.logEvent("check", "Check the settings, i: " + String(i) + " j:" + String(j));
         return;
       }
     }
@@ -192,7 +192,7 @@ BLYNK_WRITE(V10)
   if (/*segments[3][0] < segments[2][0] ||*/ segments[2][0] < segments[1][0] ||
       segments[1][0] < segments[0][0]) {
     Blynk.virtualWrite(V10, LOW);
-    Blynk.notify("Invalid Target temperature");
+    Blynk.logEvent("check", "Invalid Target temperature");
     return;
   }
 
