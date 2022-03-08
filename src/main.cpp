@@ -240,7 +240,7 @@ void sendData()
   Blynk.virtualWrite(V3, energy);
   Blynk.virtualWrite(V4, energy * COSTKWH);
   Blynk.virtualWrite(V8, tInt);
-  // Blynk.virtualWrite(V9, currentSetpoint);
+  Blynk.virtualWrite(V9, currentSetpoint);
   // Blynk.virtualWrite(V50, step);
   Blynk.virtualWrite(V51, WiFi.RSSI());
   current   = 0;
@@ -437,7 +437,7 @@ void rampRate()
 void rampDown()
 {
   // https://digitalfire.com/schedule/04dsdh
-  if (currentSetpoint < 760) {
+  if (currentSetpoint < 760 || step == 5) {
     timer.disable(controlTimer);
     timer.disable(slowCool);
     currentSetpoint = 0;
