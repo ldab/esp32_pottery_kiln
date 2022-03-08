@@ -234,14 +234,14 @@ BLYNK_WRITE(V10)
 
 void sendData()
 {
-  Blynk.virtualWrite(V0, String(temp, 2));
-  Blynk.virtualWrite(V1, String(current, 1));
-  Blynk.virtualWrite(V2, String(instPower, 0) + "W");
+  Blynk.virtualWrite(V0, temp);
+  Blynk.virtualWrite(V1, current);
+  Blynk.virtualWrite(V2, instPower);
   Blynk.virtualWrite(V3, energy);
-  Blynk.virtualWrite(V4, String(energy * COSTKWH, 1) + "dkk");
-  Blynk.virtualWrite(V8, String(tInt, 2));
-  Blynk.virtualWrite(V9, String(currentSetpoint, 2));
-  Blynk.virtualWrite(V50, step);
+  Blynk.virtualWrite(V4, energy * COSTKWH);
+  Blynk.virtualWrite(V8, tInt);
+  // Blynk.virtualWrite(V9, currentSetpoint);
+  // Blynk.virtualWrite(V50, step);
   Blynk.virtualWrite(V51, WiFi.RSSI());
   current   = 0;
   instPower = 0;
