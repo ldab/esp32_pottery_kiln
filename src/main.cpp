@@ -130,9 +130,11 @@ BLYNK_CONNECTED()
     Blynk.syncVirtual(V3, V9, V50);
     delay(250);
 
-    while (currentSetpoint == 0)
     while (currentSetpoint == -9999)
-      delay(25);
+    {
+      DBG("Wait CurrentST Sync");
+      delay(500);
+    }
 
     Blynk.syncVirtual(V10);
 
