@@ -84,7 +84,7 @@ const char *blynk_auth    = s_blynk_auth;
 
 float temp;
 float tInt;
-float currentSetpoint = 0;
+float currentSetpoint = -9999;
 volatile float instPower;
 volatile float energy = 0;
 volatile float current;
@@ -131,6 +131,7 @@ BLYNK_CONNECTED()
     delay(250);
 
     while (currentSetpoint == 0)
+    while (currentSetpoint == -9999)
       delay(25);
 
     Blynk.syncVirtual(V10);
@@ -150,19 +151,19 @@ int segments[4][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 
 BLYNK_WRITE(V11) { segments[0][0] = param.asInt(); }
 BLYNK_WRITE(V21) { segments[0][1] = param.asInt(); }
-BLYNK_WRITE(V31) { segments[0][2] = param.asInt() / 60; }
+BLYNK_WRITE(V31) { segments[0][2] = param.asInt(); }
 
 BLYNK_WRITE(V12) { segments[1][0] = param.asInt(); }
 BLYNK_WRITE(V22) { segments[1][1] = param.asInt(); }
-BLYNK_WRITE(V32) { segments[1][2] = param.asInt() / 60; }
+BLYNK_WRITE(V32) { segments[1][2] = param.asInt(); }
 
 BLYNK_WRITE(V13) { segments[2][0] = param.asInt(); }
 BLYNK_WRITE(V23) { segments[2][1] = param.asInt(); }
-BLYNK_WRITE(V33) { segments[2][2] = param.asInt() / 60; }
+BLYNK_WRITE(V33) { segments[2][2] = param.asInt(); }
 
 BLYNK_WRITE(V14) { segments[3][0] = param.asInt(); }
 BLYNK_WRITE(V24) { segments[3][1] = param.asInt(); }
-BLYNK_WRITE(V34) { segments[3][2] = param.asInt() / 60; }
+BLYNK_WRITE(V34) { segments[3][2] = param.asInt(); }
 
 // BLYNK_WRITE(V5) { segments[3][2] = param.asInt() / 60; } TODO initMillis to
 // UNIX
@@ -172,12 +173,8 @@ BLYNK_WRITE(V50) { step = param.asInt(); }
 
 BLYNK_WRITE(V10)
 {
-  char tz[] = "Europe/Copenhagen";
   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
-    if (!segments[i][2])
-      Blynk.virtualWrite(11 + i * 1 + 20, -1, -1, tz);
-    else
-      Blynk.virtualWrite(11 + i * 1 + 20, segments[i][2] * 60, -1, tz);
+    Blynk.virtualWrite(11 + i * 1 + 20, segments[i][2]);
     for (size_t j = 0; j < sizeof(segments[0]) / (sizeof(int)) - 1; j++) {
       // sync pins
       Blynk.virtualWrite(11 + i * 1 + j * 10, segments[i][j]);
@@ -541,10 +538,10 @@ void setup()
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
 
-  errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
-  String resetReason   = ESP.getResetReason();
-  uint32_t resetNumber = system_get_rst_info()->reason;
-  errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+  // errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
+  // String resetReason   = ESP.getResetReason();
+  // uint32_t resetNumber = system_get_rst_info()->reason;
+  // errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
 }
 
 void loop()
