@@ -51,7 +51,7 @@ Distributed as-is; no warranty is given.
   {                                    \
     char _msg[64] = "";                \
     sprintf(_msg, msg, ##__VA_ARGS__); \
-    Blynk.logEvent("alarm", _msg);                \
+    Blynk.logEvent("alarm", _msg);     \
     DBG("%s\n", _msg);                 \
   }
 
@@ -114,10 +114,13 @@ void rampRate();
 
 BLYNK_CONNECTED()
 {
-  String resetReason   = ESP.getResetReason();
-  uint32_t resetNumber = system_get_rst_info()->reason;
+  struct rst_info *rtc_info = system_get_rst_info();
+  String resetReason        = ESP.getResetReason();
+  uint32_t resetNumber      = rtc_info->reason;
+
   DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
-  if (resetNumber != 0 && resetNumber != 4 && resetNumber != 6) {
+
+  if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
     // Restore data from the cloud
     for (size_t i = 11; i < 15; i++) {
       Blynk.syncVirtual(i);
@@ -125,6 +128,15 @@ BLYNK_CONNECTED()
         Blynk.syncVirtual(i + j);
       }
     }
+
+    if (rtc_info->reason == REASON_EXCEPTION_RST) {
+      DBG("Fatal exception (%d):\n", rtc_info->exccause);
+      errorLog->printf("Fatal exception (%d):\n", rtc_info->exccause);
+    }
+    DBG("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
+              rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc); // The address of the last crash is printed, which is used to debug garbled output.
+    errorLog->printf("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
+              rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc);
 
     delay(250);
     Blynk.syncVirtual(V3, V9, V50);
@@ -420,7 +432,7 @@ void rampRate()
 {
   // http://www.stoneware.net/stoneware/glasyrer/firing.htm
 
-  if (currentSetpoint == 0)
+  if (currentSetpoint == -9999)
     currentSetpoint = temp;
 
   if (currentSetpoint >= segments[step][0]) {
@@ -540,7 +552,7 @@ void setup()
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
 
-  // errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
+  errorLog = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "untrol.io", BLYNK_DEVICE_NAME);
   // String resetReason   = ESP.getResetReason();
   // uint32_t resetNumber = system_get_rst_info()->reason;
   // errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
