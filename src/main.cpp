@@ -252,7 +252,7 @@ void sendData()
   Blynk.virtualWrite(V4, energy * COSTKWH);
   Blynk.virtualWrite(V8, tInt);
   Blynk.virtualWrite(V9, currentSetpoint);
-  // Blynk.virtualWrite(V50, step);
+  Blynk.virtualWrite(V50, step);
   Blynk.virtualWrite(V51, WiFi.RSSI());
   current   = 0;
   instPower = 0;
