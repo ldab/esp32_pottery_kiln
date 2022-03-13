@@ -51,7 +51,7 @@ Distributed as-is; no warranty is given.
   {                                    \
     char _msg[64] = "";                \
     sprintf(_msg, msg, ##__VA_ARGS__); \
-    Blynk.notify(_msg);                \
+    Blynk.logEvent("alarm", _msg);                \
     DBG("%s\n", _msg);                 \
   }
 
@@ -84,7 +84,7 @@ const char *blynk_auth    = s_blynk_auth;
 
 float temp;
 float tInt;
-float currentSetpoint = 0;
+float currentSetpoint = -9999;
 volatile float instPower;
 volatile float energy = 0;
 volatile float current;
@@ -130,8 +130,11 @@ BLYNK_CONNECTED()
     Blynk.syncVirtual(V3, V9, V50);
     delay(250);
 
-    while (currentSetpoint == 0)
-      delay(25);
+    while (currentSetpoint == -9999)
+    {
+      DBG("Wait CurrentST Sync");
+      delay(500);
+    }
 
     Blynk.syncVirtual(V10);
 
@@ -150,19 +153,19 @@ int segments[4][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 
 BLYNK_WRITE(V11) { segments[0][0] = param.asInt(); }
 BLYNK_WRITE(V21) { segments[0][1] = param.asInt(); }
-BLYNK_WRITE(V31) { segments[0][2] = param.asInt() / 60; }
+BLYNK_WRITE(V31) { segments[0][2] = param.asInt(); }
 
 BLYNK_WRITE(V12) { segments[1][0] = param.asInt(); }
 BLYNK_WRITE(V22) { segments[1][1] = param.asInt(); }
-BLYNK_WRITE(V32) { segments[1][2] = param.asInt() / 60; }
+BLYNK_WRITE(V32) { segments[1][2] = param.asInt(); }
 
 BLYNK_WRITE(V13) { segments[2][0] = param.asInt(); }
 BLYNK_WRITE(V23) { segments[2][1] = param.asInt(); }
-BLYNK_WRITE(V33) { segments[2][2] = param.asInt() / 60; }
+BLYNK_WRITE(V33) { segments[2][2] = param.asInt(); }
 
 BLYNK_WRITE(V14) { segments[3][0] = param.asInt(); }
 BLYNK_WRITE(V24) { segments[3][1] = param.asInt(); }
-BLYNK_WRITE(V34) { segments[3][2] = param.asInt() / 60; }
+BLYNK_WRITE(V34) { segments[3][2] = param.asInt(); }
 
 // BLYNK_WRITE(V5) { segments[3][2] = param.asInt() / 60; } TODO initMillis to
 // UNIX
@@ -172,18 +175,14 @@ BLYNK_WRITE(V50) { step = param.asInt(); }
 
 BLYNK_WRITE(V10)
 {
-  char tz[] = "Europe/Copenhagen";
   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
-    if (!segments[i][2])
-      Blynk.virtualWrite(11 + i * 1 + 20, -1, -1, tz);
-    else
-      Blynk.virtualWrite(11 + i * 1 + 20, segments[i][2] * 60, -1, tz);
+    Blynk.virtualWrite(11 + i * 1 + 20, segments[i][2]);
     for (size_t j = 0; j < sizeof(segments[0]) / (sizeof(int)) - 1; j++) {
       // sync pins
       Blynk.virtualWrite(11 + i * 1 + j * 10, segments[i][j]);
       if (segments[i][j] == 0) {
         Blynk.virtualWrite(V10, LOW);
-        Blynk.notify("Check the settings, i: " + String(i) + " j:" + String(j));
+        Blynk.logEvent("check", "Check the settings, i: " + String(i) + " j:" + String(j));
         return;
       }
     }
@@ -192,7 +191,7 @@ BLYNK_WRITE(V10)
   if (/*segments[3][0] < segments[2][0] ||*/ segments[2][0] < segments[1][0] ||
       segments[1][0] < segments[0][0]) {
     Blynk.virtualWrite(V10, LOW);
-    Blynk.notify("Invalid Target temperature");
+    Blynk.logEvent("check", "Invalid Target temperature");
     return;
   }
 
@@ -234,14 +233,14 @@ BLYNK_WRITE(V10)
 
 void sendData()
 {
-  Blynk.virtualWrite(V0, String(temp, 2));
-  Blynk.virtualWrite(V1, String(current, 1));
-  Blynk.virtualWrite(V2, String(instPower, 0) + "W");
+  Blynk.virtualWrite(V0, temp);
+  Blynk.virtualWrite(V1, current);
+  Blynk.virtualWrite(V2, instPower);
   Blynk.virtualWrite(V3, energy);
-  Blynk.virtualWrite(V4, String(energy * COSTKWH, 1) + "dkk");
-  Blynk.virtualWrite(V8, String(tInt, 2));
-  Blynk.virtualWrite(V9, String(currentSetpoint, 2));
-  Blynk.virtualWrite(V50, step);
+  Blynk.virtualWrite(V4, energy * COSTKWH);
+  Blynk.virtualWrite(V8, tInt);
+  Blynk.virtualWrite(V9, currentSetpoint);
+  // Blynk.virtualWrite(V50, step);
   Blynk.virtualWrite(V51, WiFi.RSSI());
   current   = 0;
   instPower = 0;
@@ -437,7 +436,7 @@ void rampRate()
 void rampDown()
 {
   // https://digitalfire.com/schedule/04dsdh
-  if (currentSetpoint < 760) {
+  if (currentSetpoint < 760 || step == 5) {
     timer.disable(controlTimer);
     timer.disable(slowCool);
     currentSetpoint = 0;
@@ -541,10 +540,10 @@ void setup()
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
 
-  errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
-  String resetReason   = ESP.getResetReason();
-  uint32_t resetNumber = system_get_rst_info()->reason;
-  errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+  // errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
+  // String resetReason   = ESP.getResetReason();
+  // uint32_t resetNumber = system_get_rst_info()->reason;
+  // errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
 }
 
 void loop()
