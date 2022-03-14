@@ -32,12 +32,6 @@ Distributed as-is; no warranty is given.
 #include "Adafruit_MAX31855.h"
 #include "secrets.h"
 
-#ifndef DEVICE_NAME
-#error Remember to define the Device Name
-#elif not defined TO
-#error Remember to set the email address
-#endif
-
 #ifdef VERBOSE
 #define DBG(msg, ...)                                     \
   {                                                       \
@@ -128,15 +122,6 @@ BLYNK_CONNECTED()
         Blynk.syncVirtual(i + j);
       }
     }
-
-    if (rtc_info->reason == REASON_EXCEPTION_RST) {
-      DBG("Fatal exception (%d):\n", rtc_info->exccause);
-      errorLog->printf("Fatal exception (%d):\n", rtc_info->exccause);
-    }
-    DBG("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
-              rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc); // The address of the last crash is printed, which is used to debug garbled output.
-    errorLog->printf("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
-              rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc);
 
     delay(250);
     Blynk.syncVirtual(V3, V9, V50);
