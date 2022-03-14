@@ -30,8 +30,8 @@ Distributed as-is; no warranty is given.
 #include <Wire.h>
 
 #include "Adafruit_MAX31855.h"
-#include "secrets.h"
 #include "OTA.h"
+#include "secrets.h"
 
 #ifdef VERBOSE
 #define DBG(msg, ...)                                     \
@@ -133,7 +133,7 @@ BLYNK_CONNECTED()
 
     Blynk.syncVirtual(V10);
 
-    NOTIFY(resetReason.c_str());
+    Blynk.logEvent("info", resetReason.c_str());
   }
   if (!timer.isEnabled(controlTimer)) {
     Blynk.virtualWrite(V5, 0);
@@ -218,6 +218,7 @@ BLYNK_WRITE(V10)
     Blynk.virtualWrite(V7, "Idle 💤");
     // ESP.restart();
     digitalWrite(RELAY, LOW);
+    led.off();
     step            = 0;
     holdMillis      = 0;
     currentSetpoint = -9999;
@@ -246,6 +247,9 @@ void sendData()
 
 void safetyCheck()
 {
+  static bool tIntError  = false;
+  static bool noRlyError = false;
+
   if (timer.isEnabled(controlTimer)) {
     if (temp > (currentSetpoint + 10)) // TODO check differential
     {
@@ -256,12 +260,26 @@ void safetyCheck()
   }
 
   if (tInt > 60) {
-    NOTIFY("High internal temp: %.1f°C", tInt);
+    if (!tIntError) {
+      char tIntChar[8];
+      sprintf(tIntChar, "%.1f°C", tInt);
+      DBG("High internal temp: %s", tIntChar);
+      Blynk.logEvent("highIntTemp", tIntChar);
+      tIntError = true;
+    }
+  } else {
+    tIntError = false;
   }
 
   if (digitalRead(RELAY)) {
     if ((millis() - energyMillis) > 2000L) {
-      NOTIFY("PROBLEM 2300W expect 1 pulse every ~1565ms\n");
+      if (!noRlyError) {
+        DBG("PROBLEM 2300W expect 1 pulse every ~1565ms\n");
+        Blynk.logEvent("noRlyError");
+        noRlyError = true;
+      }
+    } else {
+      noRlyError = true;
     }
   }
 }
@@ -307,8 +325,10 @@ IRAM_ATTR void readPower()
   volatile static bool problem = false;
   if (!digitalRead(RELAY)) {
     if (problem == true) {
-      NOTIFY("PROBLEM, current but relay is Off, I = %.1fA P = %.1fW", current,
-             instPower);
+      char shortError[32];
+      sprintf(shortError, "I = %.1fA P = %.1fW", current, instPower);
+      DBG("PROBLEM, current but relay is Off, %s", shortError);
+      Blynk.logEvent("shortErr", shortError);
     }
 
     problem = true;
@@ -323,6 +343,7 @@ void getTemp()
 {
   static float _t   = 0;
   static uint8_t _s = 0;
+  static bool tErr  = false;
 
   temp              = thermocouple.readCelsius();
   tInt              = thermocouple.readInternal();
@@ -340,11 +361,17 @@ void getTemp()
   // Ignore SCG fault
   // https://forums.adafruit.com/viewtopic.php?f=31&t=169135#p827564
   if (error & 0b001) {
-    temp = NAN;
-    NOTIFY("Thermocouple error #%i", error);
+    if (!tErr) {
+      temp = NAN;
+      tErr = true;
 
-    digitalWrite(RELAY, LOW);
+      DBG("Thermocouple error #%i", error);
+      Blynk.logEvent("thermocouple_error", error);
+
+      digitalWrite(RELAY, LOW);
+    }
   } else {
+    tErr = false;
     DBG("T: %.02fdegC\n", temp);
   }
 }
@@ -401,7 +428,10 @@ void tControl()
       if (step == 4) {
         uint8_t h = (millis() - initMillis) / (1000 * 3600);
         uint8_t m = ((millis() - initMillis) - (h * 3600 * 1000)) / (60 * 1000);
-        NOTIFY("Reached Temp, after: %d:%d", h, m);
+        char endInfo[64];
+        sprintf(endInfo, "Reached Temp, after: %d:%d", h, m);
+        DBG("%s", endInfo);
+        Blynk.logEvent("info", endInfo);
         Blynk.virtualWrite(V7, "Slow Cooling ❄️");
         timer.enable(slowCool);
         timer.disable(rampTimer);
