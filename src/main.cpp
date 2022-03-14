@@ -32,12 +32,6 @@ Distributed as-is; no warranty is given.
 #include "Adafruit_MAX31855.h"
 #include "secrets.h"
 
-#ifndef DEVICE_NAME
-#error Remember to define the Device Name
-#elif not defined TO
-#error Remember to set the email address
-#endif
-
 #ifdef VERBOSE
 #define DBG(msg, ...)                                     \
   {                                                       \
@@ -51,7 +45,7 @@ Distributed as-is; no warranty is given.
   {                                    \
     char _msg[64] = "";                \
     sprintf(_msg, msg, ##__VA_ARGS__); \
-    Blynk.logEvent("alarm", _msg);                \
+    Blynk.logEvent("alarm", _msg);     \
     DBG("%s\n", _msg);                 \
   }
 
@@ -116,8 +110,8 @@ BLYNK_CONNECTED()
 {
   String resetReason   = ESP.getResetReason();
   uint32_t resetNumber = system_get_rst_info()->reason;
-  DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
-  if (resetNumber != 0 && resetNumber != 4 && resetNumber != 6) {
+
+  if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
     // Restore data from the cloud
     for (size_t i = 11; i < 15; i++) {
       Blynk.syncVirtual(i);
@@ -225,7 +219,7 @@ BLYNK_WRITE(V10)
     digitalWrite(RELAY, LOW);
     step            = 0;
     holdMillis      = 0;
-    currentSetpoint = 0;
+    currentSetpoint = -9999;
     timer.disable(controlTimer);
     timer.disable(rampTimer);
   }
@@ -240,7 +234,7 @@ void sendData()
   Blynk.virtualWrite(V4, energy * COSTKWH);
   Blynk.virtualWrite(V8, tInt);
   Blynk.virtualWrite(V9, currentSetpoint);
-  // Blynk.virtualWrite(V50, step);
+  Blynk.virtualWrite(V50, step);
   Blynk.virtualWrite(V51, WiFi.RSSI());
   current   = 0;
   instPower = 0;
@@ -420,7 +414,7 @@ void rampRate()
 {
   // http://www.stoneware.net/stoneware/glasyrer/firing.htm
 
-  if (currentSetpoint == 0)
+  if (currentSetpoint == -9999)
     currentSetpoint = temp;
 
   if (currentSetpoint >= segments[step][0]) {
@@ -540,10 +534,25 @@ void setup()
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
 
-  // errorLog             = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "papertrail-test", "testing");
-  // String resetReason   = ESP.getResetReason();
-  // uint32_t resetNumber = system_get_rst_info()->reason;
-  // errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+  struct rst_info *rtc_info = system_get_rst_info();
+  uint32_t resetNumber      = rtc_info->reason;
+
+  if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
+    errorLog = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "untrol.io", BLYNK_DEVICE_NAME);
+    String resetReason        = ESP.getResetReason();
+
+    DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+    errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+
+    if (rtc_info->reason == REASON_EXCEPTION_RST) {
+      DBG("Fatal exception (%d):\n", rtc_info->exccause);
+      errorLog->printf("Fatal exception (%d):\n", rtc_info->exccause);
+    }
+    DBG("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
+        rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc); // The address of the last crash is printed, which is used to debug garbled output.
+    errorLog->printf("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
+                     rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc);
+  }
 }
 
 void loop()
