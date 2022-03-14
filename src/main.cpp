@@ -219,7 +219,7 @@ BLYNK_WRITE(V10)
     digitalWrite(RELAY, LOW);
     step            = 0;
     holdMillis      = 0;
-    currentSetpoint = 0;
+    currentSetpoint = -9999;
     timer.disable(controlTimer);
     timer.disable(rampTimer);
   }
