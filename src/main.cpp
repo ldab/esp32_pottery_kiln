@@ -108,11 +108,8 @@ void rampRate();
 
 BLYNK_CONNECTED()
 {
-  struct rst_info *rtc_info = system_get_rst_info();
-  String resetReason        = ESP.getResetReason();
-  uint32_t resetNumber      = rtc_info->reason;
-
-  DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+  String resetReason   = ESP.getResetReason();
+  uint32_t resetNumber = system_get_rst_info()->reason;
 
   if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
     // Restore data from the cloud
@@ -537,10 +534,25 @@ void setup()
   slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
   timer.disable(slowCool);
 
-  errorLog = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "untrol.io", BLYNK_DEVICE_NAME);
-  // String resetReason   = ESP.getResetReason();
-  // uint32_t resetNumber = system_get_rst_info()->reason;
-  // errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+  struct rst_info *rtc_info = system_get_rst_info();
+  uint32_t resetNumber      = rtc_info->reason;
+
+  if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
+    errorLog = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "untrol.io", BLYNK_DEVICE_NAME);
+    String resetReason        = ESP.getResetReason();
+
+    DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+    errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
+
+    if (rtc_info->reason == REASON_EXCEPTION_RST) {
+      DBG("Fatal exception (%d):\n", rtc_info->exccause);
+      errorLog->printf("Fatal exception (%d):\n", rtc_info->exccause);
+    }
+    DBG("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
+        rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc); // The address of the last crash is printed, which is used to debug garbled output.
+    errorLog->printf("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
+                     rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc);
+  }
 }
 
 void loop()
