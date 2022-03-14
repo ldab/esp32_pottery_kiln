@@ -31,6 +31,7 @@ Distributed as-is; no warranty is given.
 
 #include "Adafruit_MAX31855.h"
 #include "secrets.h"
+#include "OTA.h"
 
 #ifdef VERBOSE
 #define DBG(msg, ...)                                     \
@@ -538,8 +539,8 @@ void setup()
   uint32_t resetNumber      = rtc_info->reason;
 
   if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
-    errorLog = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "untrol.io", BLYNK_DEVICE_NAME);
-    String resetReason        = ESP.getResetReason();
+    errorLog           = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "untrol.io", BLYNK_DEVICE_NAME);
+    String resetReason = ESP.getResetReason();
 
     DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
     errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
