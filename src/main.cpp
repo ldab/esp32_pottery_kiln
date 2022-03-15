@@ -2,14 +2,15 @@
 main.cpp
 ESP8266 based Kiln controller, thermocouple type K, MAX31855
 Leonardo Bispo
-Feb, 2021
+March, 2022
 https://github.com/ldab/kiln
 Distributed as-is; no warranty is given.
 ******************************************************************************/
 
-#include <Arduino.h>
+#define BLYNK_PRINT Serial // Defines the object that is used for printing
+// #define BLYNK_DEBUG        // Optional, this enables more detailed prints
 
-// #define BLYNK_PRINT Serial
+#include <Arduino.h>
 
 // Blynk and WiFi
 #include <BlynkSimpleEsp8266.h>
@@ -116,24 +117,18 @@ BLYNK_CONNECTED()
     // Restore data from the cloud
     for (size_t i = 11; i < 15; i++) {
       Blynk.syncVirtual(i);
-      for (size_t j = 10; j < 35; j += 10) {
+      for (size_t j = 10; j < 25; j += 10) {
         Blynk.syncVirtual(i + j);
       }
     }
 
-    delay(250);
     Blynk.syncVirtual(V3, V9, V50);
-    delay(250);
 
-    while (currentSetpoint == -9999)
-    {
-      DBG("Wait CurrentST Sync");
-      delay(500);
-    }
+    // Blynk.syncVirtual(V10);
 
-    Blynk.syncVirtual(V10);
-
-    Blynk.logEvent("info", resetReason.c_str());
+    char resetInfo[32];
+    sprintf(resetInfo, "%s epc1=0x%08x", resetReason.c_str(), system_get_rst_info()->epc1);
+    Blynk.logEvent("info", resetInfo);
   }
   if (!timer.isEnabled(controlTimer)) {
     Blynk.virtualWrite(V5, 0);

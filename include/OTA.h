@@ -12,7 +12,6 @@
 #include "WiFiUdp.h"
 #include <ESP8266HTTPClient.h>
 
-#define BLYNK_PRINT Serial
 #define OTA_FATAL(...)       \
   {                          \
     BLYNK_LOG1(__VA_ARGS__); \
