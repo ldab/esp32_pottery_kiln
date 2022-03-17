@@ -129,8 +129,7 @@ BLYNK_CONNECTED()
     char resetInfo[32];
     sprintf(resetInfo, "%s epc1=0x%08x", resetReason.c_str(), system_get_rst_info()->epc1);
     Blynk.logEvent("info", resetInfo);
-  }
-  if (!timer.isEnabled(controlTimer)) {
+  } else if (!timer.isEnabled(controlTimer)) {
     Blynk.virtualWrite(V5, 0);
     Blynk.virtualWrite(V10, 0);
     Blynk.virtualWrite(V7, "Idle 💤");
@@ -162,6 +161,8 @@ BLYNK_WRITE(V34) { segments[3][2] = param.asInt(); }
 BLYNK_WRITE(V3) { energy = param.asFloat(); }
 BLYNK_WRITE(V9) { currentSetpoint = param.asFloat(); }
 BLYNK_WRITE(V50) { step = param.asInt(); }
+
+BLYNK_WRITE(V127) { while (true); } // trigger software watchdog
 
 BLYNK_WRITE(V10)
 {
@@ -578,6 +579,8 @@ void setup()
         rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc); // The address of the last crash is printed, which is used to debug garbled output.
     errorLog->printf("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
                      rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc);
+
+    Blynk.syncVirtual(V10);
   }
 }
 
