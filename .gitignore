@@ -6,8 +6,6 @@
 .vscode/extensions.json
 .vscode/settings.json
 
-include/secrets.h
-
 #remove the serial monitor log
 *.log
 
