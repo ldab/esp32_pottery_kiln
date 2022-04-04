@@ -7,23 +7,25 @@ https://github.com/ldab/kiln
 Distributed as-is; no warranty is given.
 ******************************************************************************/
 
-#define BLYNK_PRINT Serial // Defines the object that is used for printing
-// #define BLYNK_DEBUG        // Optional, this enables more detailed prints
-
 #include <Arduino.h>
 
-// Blynk and WiFi
-#include <BlynkSimpleEsp8266.h>
-#include <ESP8266WiFi.h>
-#include <TimeLib.h>
+#include <Ticker.h>
+
+#include <DNSServer.h>
+#include <ESPmDNS.h>
+
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <Update.h>
+#include <WiFi.h>
+
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+
+#include "SPIFFS.h"
 
 // PapertrailLogger
 #include "PapertrailLogger.h"
-#include <WiFiUdp.h>
-
-// OTA
-#include <ArduinoOTA.h>
-#include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 
 // MAX31855
@@ -31,52 +33,53 @@ Distributed as-is; no warranty is given.
 #include <Wire.h>
 
 #include "Adafruit_MAX31855.h"
-#include "OTA.h"
-#include "secrets.h"
+
+#include "html_strings.h"
 
 #ifdef VERBOSE
-#define DBG(msg, ...)                                     \
-  {                                                       \
-    Serial.printf("[%lu] " msg, millis(), ##__VA_ARGS__); \
+#define DBG(msg, ...)                                                          \
+  {                                                                            \
+    Serial.printf("[%lu] " msg, millis(), ##__VA_ARGS__);                      \
   }
 #else
 #define DBG(...)
 #endif
 
-#define NOTIFY(msg, ...)               \
-  {                                    \
-    char _msg[64] = "";                \
-    sprintf(_msg, msg, ##__VA_ARGS__); \
-    Blynk.logEvent("alarm", _msg);     \
-    DBG("%s\n", _msg);                 \
+#define NOTIFY(msg, ...)                                                       \
+  {                                                                            \
+    char _msg[64] = "";                                                        \
+    sprintf(_msg, msg, ##__VA_ARGS__);                                         \
+    Blynk.logEvent("alarm", _msg);                                             \
+    DBG("%s\n", _msg);                                                         \
   }
 
 // https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
-#define BUZZER         D0 // GPIO12
-#define RELAY          D1 // GPIO5
-#define POWER          D2 // GPIO4
-
-#define BUZZER_CHANNEL 1
+#define RELAY        16
+#define POWER        17
+#define LED_R        25
+#define LED_G        26
+#define LED_B        27
+#define SPI_CS       22
+#define SPI_MISO     21
+#define SPI_CLK      23
+#define I2C_SDA      32
+#define I2C_SCL      33
 
 // Heating Rate (°C/hr) during the last 100°C of Firing
-#define SLOWFIRE       15
-#define MEDIUMFIRE     60
-#define FASTFIRE       150
+#define SLOWFIRE     15
+#define MEDIUMFIRE   60
+#define FASTFIRE     150
 
-#define COSTKWH        2.14
+#define COSTKWH      2.14
 
-#define RATEUPDATE     60 // every 60 seconds
+#define RATEUPDATE   60 // every 60 seconds
 
-#define DIFFERENTIAL   5 // degC
+#define DIFFERENTIAL 5 // degC
 
-// Update these with values suitable for your network.
-const char *wifi_ssid     = s_wifi_ssid;
-const char *wifi_password = s_wifi_password;
-const char *mqtt_server   = s_mqtt_server;
-const char *mqtt_user     = s_mqtt_user;
-const char *mqtt_pass     = s_mqtt_pass;
-uint16_t mqtt_port        = s_mqtt_port;
-const char *blynk_auth    = s_blynk_auth;
+const char *mqtt_server = s_mqtt_server;
+const char *mqtt_user   = s_mqtt_user;
+const char *mqtt_pass   = s_mqtt_pass;
+uint16_t mqtt_port      = s_mqtt_port;
 
 float temp;
 float tInt;
@@ -92,28 +95,238 @@ uint32_t holdMillis            = 0;
 int step                       = 0;
 
 // Timer instance numbers
-int controlTimer;
-int safetyTimer;
-int rampTimer;
-int slowCool;
+Ticker controlTimer;
+Ticker safetyTimer;
+Ticker rampTimer;
+Ticker slowCool;
+Ticker tempTimer;
+Ticker sendTimer;
 
-Adafruit_MAX31855 thermocouple(PIN_SPI_SS);
-
-BlynkTimer timer;
-
-WidgetLED led(V6);
+DNSServer dnsServer;
+AsyncWebServer server(80);
+AsyncEventSource events("/events"); // event source (Server-Sent events)
+AsyncWebSocket ws("/ws");           // access at ws://[esp ip]/ws
+Adafruit_MAX31855 thermocouple(SPI_CLK, SPI_CS, SPI_MISO);
 
 PapertrailLogger *errorLog;
 
 void printSegments();
 void rampRate();
+String processor(const String &var);
+String readFile(fs::FS &fs, const char *path);
+void writeFile(fs::FS &fs, const char *path, const char *message);
+
+class CaptiveRequestHandler : public AsyncWebHandler
+{
+  public:
+  CaptiveRequestHandler() {}
+  virtual ~CaptiveRequestHandler() {}
+
+  bool canHandle(AsyncWebServerRequest *request)
+  {
+    // request->addInterestingHeader("ANY");
+    return true;
+  }
+
+  void handleRequest(AsyncWebServerRequest *request)
+  {
+    request->send_P(200, "text/html", HTTP_CONFIG, processor);
+  }
+};
+
+void espRestart() { ESP.restart(); }
+
+// Send notification to HA, max 32 bytes
+void notify(char *msg, size_t length)
+{
+  HTTPClient http;
+  WiFiClientSecure client;
+
+  String url   = readFile(SPIFFS, serverPath);
+  String token = readFile(SPIFFS, tokenPath);
+
+  // client.setCACert(CA_CERT);
+  client.setInsecure();
+  if (!client.connect(url.c_str(), 8123, 4000)) {
+    DBG("Connection failed!\n");
+  } else {
+    DBG("Connected!\n");
+    char _msg[32];
+    client.println("POST /api/services/notify/notify HTTP/1.1");
+    client.print("Host: ");
+    client.println(url);
+    client.println("Content-Type: application/json");
+    client.print("Content-Length: ");
+    client.printf("%u\n", length + 15);
+    client.print("Authorization: Bearer ");
+    client.println(token);
+    client.println();
+    sprintf(_msg, "{\"message\": \"%s\"}\n", msg);
+    client.println(_msg);
+    DBG("%s\n", _msg);
+
+    while (client.connected()) {
+      String line = client.readStringUntil('\n');
+      if (line.endsWith("OK\r\n"))
+        Serial.println(line);
+      if (line == "\r")
+        break;
+    }
+
+    while (client.available())
+      client.read();
+
+    client.stop();
+  }
+}
+
+void onUpload(AsyncWebServerRequest *request, String filename, size_t index,
+              uint8_t *data, size_t len, bool final)
+{
+  if (!index) {
+    Serial.printf("Update Start: %s\n", filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Update.printError(Serial);
+    }
+  }
+  Serial.printf("Progress: %u of %u\r", Update.progress(), Update.size());
+  if (!Update.hasError()) {
+    if (Update.write(data, len) != len) {
+      Update.printError(Serial);
+    }
+  }
+  if (final) {
+    if (Update.end(true)) {
+      Serial.printf("Update Success: %uB\n", index + len);
+      request->redirect("/");
+      restart.once_ms(1000, espRestart);
+    } else {
+      Update.printError(Serial);
+    }
+  }
+}
+
+void onRequest(AsyncWebServerRequest *request)
+{
+  // Handle Unknown Request
+  request->send(404, "text/plain", "OUCH");
+}
+
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
+             AwsEventType type, void *arg, uint8_t *data, size_t len)
+{
+  // Handle WebSocket event
+}
+
+String processor(const String &var)
+{
+  Serial.print("processor:");
+  Serial.println(var);
+
+  if (var == "CSS_TEMPLATE")
+    return FPSTR(HTTP_STYLE);
+  if (var == "INDEX_JS")
+    return FPSTR(HTTP_JS);
+  if (var == "HTML_HEAD_TITLE")
+    return FPSTR(HTML_HEAD_TITLE);
+  if (var == "HTML_INFO_BOX") {
+    String ret = "";
+    if (WiFi.isConnected()) {
+      ret = "<strong> Connected</ strong> to ubx<br><em><small> with IP ";
+      ret += WiFi.localIP().toString();
+      ret += "</small>";
+    } else
+      ret = "<strong> Not Connected</ strong>";
+
+    return ret;
+  }
+  return String();
+}
+
+void captiveServer()
+{
+  server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
+    int params = request->params();
+    for (int i = 0; i < params; i++) {
+      AsyncWebParameter *p = request->getParam(i);
+      if (p->isPost()) {
+        // HTTP POST ssid value
+        if (p->name() == "ssid") {
+          ssid = p->value().c_str();
+          Serial.print("SSID set to: ");
+          Serial.println(ssid);
+        }
+        if (p->name() == "pass") {
+          pass = p->value().c_str();
+          Serial.print("Password set to: ");
+          Serial.println(pass);
+        }
+        if (p->name() == "server") {
+          String url = p->value().c_str();
+          writeFile(SPIFFS, serverPath, url.c_str());
+        }
+        if (p->name() == "token") {
+          String token = p->value().c_str();
+          writeFile(SPIFFS, tokenPath, token.c_str());
+        }
+      }
+    }
+    WiFi.persistent(true);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    Serial.print("Connecting to WiFi ..");
+    while (WiFi.status() != WL_CONNECTED) {
+      Serial.print('.');
+      delay(100);
+    }
+    Serial.println("connected");
+    restart.once_ms(1000, espRestart);
+    request->redirect("http://" + WiFi.localIP().toString());
+  });
+}
+
+// Read File from SPIFFS
+String readFile(fs::FS &fs, const char *path)
+{
+  DBG("Reading file: %s\r\n", path);
+
+  File file = fs.open(path);
+  if (!file || file.isDirectory()) {
+    Serial.println("- failed to open file for reading");
+    return String();
+  }
+
+  String fileContent;
+  while (file.available()) {
+    fileContent = file.readStringUntil('\n');
+    break;
+  }
+  return fileContent;
+}
+
+// Write file to SPIFFS
+void writeFile(fs::FS &fs, const char *path, const char *message)
+{
+  Serial.printf("Writing file: %s\r\n", path);
+
+  File file = fs.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("- failed to open file for writing");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("- file written");
+  } else {
+    Serial.println("- frite failed");
+  }
+}
 
 BLYNK_CONNECTED()
 {
   String resetReason   = ESP.getResetReason();
   uint32_t resetNumber = system_get_rst_info()->reason;
 
-  if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
+  if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART &&
+      resetNumber != REASON_EXT_SYS_RST) {
     // Restore data from the cloud
     for (size_t i = 11; i < 15; i++) {
       Blynk.syncVirtual(i);
@@ -127,7 +340,8 @@ BLYNK_CONNECTED()
     // Blynk.syncVirtual(V10);
 
     char resetInfo[32];
-    sprintf(resetInfo, "%s epc1=0x%08x", resetReason.c_str(), system_get_rst_info()->epc1);
+    sprintf(resetInfo, "%s epc1=0x%08x", resetReason.c_str(),
+            system_get_rst_info()->epc1);
     Blynk.logEvent("info", resetInfo);
   } else if (!timer.isEnabled(controlTimer)) {
     Blynk.virtualWrite(V5, 0);
@@ -162,7 +376,11 @@ BLYNK_WRITE(V3) { energy = param.asFloat(); }
 BLYNK_WRITE(V9) { currentSetpoint = param.asFloat(); }
 BLYNK_WRITE(V50) { step = param.asInt(); }
 
-BLYNK_WRITE(V127) { while (true); } // trigger software watchdog
+BLYNK_WRITE(V127)
+{
+  while (true)
+    ;
+} // trigger software watchdog
 
 BLYNK_WRITE(V10)
 {
@@ -173,7 +391,8 @@ BLYNK_WRITE(V10)
       Blynk.virtualWrite(11 + i * 1 + j * 10, segments[i][j]);
       if (segments[i][j] == 0) {
         Blynk.virtualWrite(V10, LOW);
-        Blynk.logEvent("check", "Check the settings, i: " + String(i) + " j:" + String(j));
+        Blynk.logEvent("check", "Check the settings, i: " + String(i) +
+                                    " j:" + String(j));
         return;
       }
     }
@@ -206,9 +425,9 @@ BLYNK_WRITE(V10)
     Blynk.virtualWrite(V7, "Firing 🔥 @" + String(segments[step][0]) + "°C");
 
     printSegments();
-    timer.enable(controlTimer);
-    timer.enable(rampTimer);
     rampRate();
+    controlTimer.attach_ms(5530L, tControl);
+    rampTimer.attach_ms(RATEUPDATE * 1000L, rampRate);
   } else {
     DBG("Button pressed, disable temp control\n");
     Blynk.virtualWrite(V7, "Idle 💤");
@@ -218,8 +437,8 @@ BLYNK_WRITE(V10)
     step            = 0;
     holdMillis      = 0;
     currentSetpoint = -9999;
-    timer.disable(controlTimer);
-    timer.disable(rampTimer);
+    controlTimer.detach();
+    rampTimer.detach();
   }
 }
 
@@ -293,7 +512,7 @@ void printSegments()
   Serial.printf("\n");
 }
 
-IRAM_ATTR void readPower()
+void IRAM_ATTR readPower()
 {
   if (energy == 0) {
     // We don't know the time difference between pulse, reset
@@ -471,12 +690,17 @@ void rampDown()
 void pinInit()
 {
   pinMode(POWER, INPUT);
-  attachInterrupt(digitalPinToInterrupt(POWER), readPower, RISING);
+  attachInterrupt(POWER, readPower, FALLING);
 
   pinMode(RELAY, OUTPUT);
   digitalWrite(RELAY, LOW);
 
-  pinMode(BUZZER, OUTPUT);
+  pinMode(LED_R, OUTPUT);
+  pinMode(LED_G, OUTPUT);
+  pinMode(LED_B, OUTPUT);
+  digitalWrite(LED_R, HIGH);
+  digitalWrite(LED_G, HIGH);
+  digitalWrite(LED_B, HIGH);
 }
 
 void otaInit()
@@ -532,61 +756,190 @@ void setup()
 
   pinInit();
 
+  WiFi.mode(WIFI_STA);
+  WiFi.begin();
+
+  // Initialize SPIFFS
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+
   if (!thermocouple.begin()) {
     DBG("ERROR.\n");
     // while (1) delay(10);
   } else
     DBG("MAX31855 Good\n");
 
-  wifi_station_set_hostname("kiln");
-  Blynk.begin(blynk_auth, wifi_ssid, wifi_password);
+  if (WiFi.waitForConnectResult() == WL_DISCONNECTED ||
+      WiFi.waitForConnectResult() == WL_NO_SSID_AVAIL) { //~ 100 * 100ms
+    Serial.printf("WiFi Failed!: %u\n", WiFi.status());
 
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    delay(50);
+    captiveServer();
+
+    WiFi.softAP("esp-captive");
+
+    server.onNotFound(
+        [](AsyncWebServerRequest *request) { request->redirect("/"); });
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    dnsServer.start(53, "*", WiFi.softAPIP());
+
+    DBG("Start Captive Portal at: %s\n", WiFi.softAPIP().toString().c_str());
+
+    server.addHandler(new CaptiveRequestHandler())
+        .setFilter(ON_AP_FILTER); // only when requested from AP
+  } else {
+    Serial.printf("WiFi Connected!\n");
+    Serial.println(WiFi.localIP());
+
+    // https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/ResetReason/ResetReason.ino
+    esp_reset_reason_t reset_reason = esp_reset_reason();
+    if (reset_reason == ESP_RST_PANIC || reset_reason == ESP_RST_INT_WDT ||
+        reset_reason == ESP_RST_TASK_WDT || reset_reason == ESP_RST_WDT ||
+        reset_reason == ESP_RST_BROWNOUT) {
+      char rstMsg[12];
+      sprintf(rstMsg, "WDT= %u", reset_reason);
+      notify(rstMsg, strlen(rstMsg));
+    }
+
+    MDNS.begin("kiln");
+
+    server.addHandler(&events);
+
+    events.onConnect([](AsyncEventSourceClient *client) {
+      if (client->lastId()) {
+        Serial.printf(
+            "Client reconnected! Last message ID that it got is: %u\n",
+            client->lastId());
+      }
+      // send event with message "hello!", id current millis
+      // and set reconnect delay to 1 second
+      client->send("hello!", NULL, millis(), 10000);
+    });
+
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+      request->send_P(200, "text/html", HTTP_INDEX, processor);
+    });
+
+    server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *request) {
+      request->send_P(200, "text/html", HTTP_CONFIG, processor);
+    });
+
+    server.on("/info", HTTP_GET, [](AsyncWebServerRequest *request) {
+      request->send_P(200, "text/html", HTTP_INFO, processor);
+    });
+
+    server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
+      request->send_P(200, "text/html", HTTP_UPDATE, processor);
+    });
+
+    server.on("/notify", HTTP_GET, [](AsyncWebServerRequest *request) {
+      notify("hi", strlen("hi"));
+      request->send_P(200, "text/plain", "OK");
+    });
+
+    server.on(
+        "/u", HTTP_POST,
+        [](AsyncWebServerRequest *request) {
+          AsyncWebServerResponse *response = request->beginResponse(
+              200, "text/plain", Update.hasError() ? "OK" : "FAIL");
+          response->addHeader("Connection", "close");
+          request->send(response);
+        },
+        onUpload);
+
+    server.on("/gpio", HTTP_GET, [](AsyncWebServerRequest *request) {
+      String inputMessage1;
+      String inputMessage2;
+      // GET input1 value on
+      // <ESP_IP>/gpio?output=<inputMessage1>&state=<inputMessage2>
+      if (request->hasParam("output") && request->hasParam("state")) {
+        inputMessage1 = request->getParam("output")->value();
+        inputMessage2 = request->getParam("state")->value();
+        digitalWrite(inputMessage1.toInt(), inputMessage2.toInt());
+      } else {
+        inputMessage1 = "No message sent";
+        inputMessage2 = "No message sent";
+      }
+      Serial.print("GPIO: ");
+      Serial.print(inputMessage1);
+      Serial.print(" - Set to: ");
+      Serial.println(inputMessage2);
+      request->send(200, "text/plain", "OK");
+    });
+
+    server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
+      String json = "[";
+      int n       = WiFi.scanComplete();
+      if (n == WIFI_SCAN_FAILED)
+        WiFi.scanNetworks(false, false, false, 100);
+
+      n = WiFi.scanComplete();
+
+      if (n) {
+        for (int i = 0; i < n; ++i) {
+          if (i)
+            json += ",";
+          json += "{";
+          json += "\"rssi\":" + String(WiFi.RSSI(i));
+          json += ",\"ssid\":\"" + WiFi.SSID(i) + "\"";
+          json += ",\"bssid\":\"" + WiFi.BSSIDstr(i) + "\"";
+          json += ",\"channel\":" + String(WiFi.channel(i));
+          json += ",\"secure\":" + String(WiFi.encryptionType(i));
+          json += "}";
+        }
+        WiFi.scanDelete();
+      }
+      json += "]";
+      Serial.println(json);
+      request->send(200, "application/json", json);
+      json = String();
+    });
+
+    tempTimer.attach(2, getTemp);
   }
 
-  otaInit();
+  server.onNotFound(onRequest);
+  server.begin();
 
-  timer.setInterval(2000L, getTemp);
-  timer.setInterval(10000L, sendData);
+  // otaInit();
 
-  safetyTimer  = timer.setInterval(2115L, safetyCheck); // 2100ms =~ 7.5A
+  safetyTimer.attach_ms(2115L, safetyCheck);
+  sendTimer.attach_ms(10000L, sendData);
+  tempTimer.attach_ms(2000L, getTemp);
 
-  controlTimer = timer.setInterval(5530L, tControl);
-  timer.disable(controlTimer); // enable it after button is pressed
+  // controlTimer = timer.setInterval(5530L, tControl);
+  // timer.disable(controlTimer); // enable it after button is pressed
 
-  rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
-  timer.disable(rampTimer); // enable it after button is pressed
+  // rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
+  // timer.disable(rampTimer); // enable it after button is pressed
 
-  slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
-  timer.disable(slowCool);
+  // slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
+  // timer.disable(slowCool);
 
-  struct rst_info *rtc_info = system_get_rst_info();
-  uint32_t resetNumber      = rtc_info->reason;
-
-  if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART && resetNumber != REASON_EXT_SYS_RST) {
-    errorLog           = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error, "\033[0;31m", "untrol.io", BLYNK_DEVICE_NAME);
+  esp_reset_reason_t reset_reason = esp_reset_reason();
+  if (reset_reason == ESP_RST_PANIC || reset_reason == ESP_RST_INT_WDT ||
+      reset_reason == ESP_RST_TASK_WDT || reset_reason == ESP_RST_WDT ||
+      reset_reason == ESP_RST_BROWNOUT) {
+    errorLog =
+        new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error,
+                             "\033[0;31m", "untrol.io", "kiln");
     String resetReason = ESP.getResetReason();
 
-    DBG("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
-    errorLog->printf("Reset Reason [%d] %s\n", resetNumber, resetReason.c_str());
-
-    if (rtc_info->reason == REASON_EXCEPTION_RST) {
-      DBG("Fatal exception (%d):\n", rtc_info->exccause);
-      errorLog->printf("Fatal exception (%d):\n", rtc_info->exccause);
-    }
-    DBG("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
-        rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc); // The address of the last crash is printed, which is used to debug garbled output.
-    errorLog->printf("epc1=0x%08x, epc2=0x%08x, epc3=0x%08x, excvaddr=0x%08x, depc=0x%08x\n", rtc_info->epc1, rtc_info->epc2,
-                     rtc_info->epc3, rtc_info->excvaddr, rtc_info->depc);
+    DBG("Reset Reason [%d]\n", reset_reason);
+    errorLog->printf("Reset Reason [%d]\n", reset_reason);
 
     Blynk.syncVirtual(V10);
   }
+
+  server.onNotFound(onRequest);
+  server.begin();
 }
 
 void loop()
 {
-  ArduinoOTA.handle();
-  Blynk.run();
-  timer.run();
+  if (WiFi.getMode() == WIFI_MODE_AP || WiFi.getMode() == WIFI_MODE_APSTA)
+    dnsServer.processNextRequest();
+
+  // ArduinoOTA.handle();
 }
