@@ -14,6 +14,10 @@
 # For PCBs designed using KiCad: http://www.kicad-pcb.org/
 # Format documentation: http://kicad-pcb.org/help/file-formats/
 
+pcb/fab/*
+!./*.zip
+pcb/esp32_din_rail-backups/*
+
 # Temporary files
 *.000
 *.bak
@@ -39,5 +43,6 @@ fp-info-cache
 # Exported BOM files
 *.xml
 PCB/iot_plant_watering_sensor_esp32/iot_plant_watering_sensor_esp32-cache.lib
-PCB/iot_plant_watering_sensor_esp32/fp-lib-table
+fp-lib-table
+sym-lib-table
 .pio/build/project.checksum
