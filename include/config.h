@@ -24,10 +24,12 @@ const char HTTP_CONFIG[] PROGMEM = R"rawliteral(
               <input type="text" id ="ssid" name="ssid"><br>
               <label for="pass">Password</label>
               <input type="text" id ="pass" name="pass"><br>
-              <label for="server">Server</label>
-              <input type="text" id ="server" name="server"><br>
-              <label for="token">Token</label>
+              <label for="server">MQTT Server</label>
+              <input type="text" id ="server" name="server" value="io.adafruit.com"><br>
+              <label for="token">MQTT Password</label>
               <input type="text" id ="token" name="token"><br>
+              <label for="port">Port</label>
+              <input type="number" id ="port" name="port"min="0" max="9999" value=1883><br>
               <input type ="submit" value ="Submit">
             </p>
           </form>
