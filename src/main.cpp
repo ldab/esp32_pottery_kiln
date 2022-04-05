@@ -53,6 +53,7 @@ extern "C" {
 #define DBG(msg, ...)                                                          \
   {                                                                            \
     Serial.printf("[%lu] " msg, millis(), ##__VA_ARGS__);                      \
+    Serial.flush();                                                            \
   }
 #else
 #define DBG(...)
@@ -89,11 +90,11 @@ extern "C" {
 
 #define DIFFERENTIAL 5 // degC
 
-const char *mqtt_server = "/mqtt_server.txt";
-const char *mqtt_user   = "/mqtt_user.txt";
-const char *mqtt_pass   = "/mqtt_pass.txt";
-const char *mqtt_token  = "/mqtt_token.txt";
-const char *mqtt_port   = "/mqtt_port.txt";
+const char *p_mqtt   = "/mqtt.txt";
+char mqtt_user[64]   = {'\0'};
+char mqtt_pass[64]   = {'\0'};
+char mqtt_server[64] = {'\0'};
+uint16_t mqtt_port   = 1883;
 
 String ssid, pass;
 
@@ -163,45 +164,45 @@ void espRestart() { ESP.restart(); }
 // Send notification to HA, max 32 bytes
 void notify(char *msg, size_t length)
 {
-  HTTPClient http;
-  WiFiClientSecure client;
+  char topic[64] = {'\0'};
+  sprintf(topic, "%s/g/kiln/json", mqtt_user);
+  mqttClient.publish(topic, 0, false, msg, length);
+  // HTTPClient http;
+  // WiFiClientSecure client;
 
-  String url   = readFile(SPIFFS, mqtt_server);
-  String token = readFile(SPIFFS, mqtt_token);
+  // // client.setCACert(CA_CERT);
+  // client.setInsecure();
+  // if (!client.connect(url.c_str(), 8123, 4000)) {
+  //   DBG("Connection failed!\n");
+  // } else {
+  //   DBG("Connected!\n");
+  //   char _msg[32];
+  //   client.println("POST /api/services/notify/notify HTTP/1.1");
+  //   client.print("Host: ");
+  //   client.println(url);
+  //   client.println("Content-Type: application/json");
+  //   client.print("Content-Length: ");
+  //   client.printf("%u\n", length + 15);
+  //   client.print("Authorization: Bearer ");
+  //   client.println(token);
+  //   client.println();
+  //   sprintf(_msg, "{\"message\": \"%s\"}\n", msg);
+  //   client.println(_msg);
+  //   DBG("%s\n", _msg);
 
-  // client.setCACert(CA_CERT);
-  client.setInsecure();
-  if (!client.connect(url.c_str(), 8123, 4000)) {
-    DBG("Connection failed!\n");
-  } else {
-    DBG("Connected!\n");
-    char _msg[32];
-    client.println("POST /api/services/notify/notify HTTP/1.1");
-    client.print("Host: ");
-    client.println(url);
-    client.println("Content-Type: application/json");
-    client.print("Content-Length: ");
-    client.printf("%u\n", length + 15);
-    client.print("Authorization: Bearer ");
-    client.println(token);
-    client.println();
-    sprintf(_msg, "{\"message\": \"%s\"}\n", msg);
-    client.println(_msg);
-    DBG("%s\n", _msg);
+  //   while (client.connected()) {
+  //     String line = client.readStringUntil('\n');
+  //     if (line.endsWith("OK\r\n"))
+  //       Serial.println(line);
+  //     if (line == "\r")
+  //       break;
+  //   }
 
-    while (client.connected()) {
-      String line = client.readStringUntil('\n');
-      if (line.endsWith("OK\r\n"))
-        Serial.println(line);
-      if (line == "\r")
-        break;
-    }
+  //   while (client.available())
+  //     client.read();
 
-    while (client.available())
-      client.read();
-
-    client.stop();
-  }
+  //   client.stop();
+  // }
 }
 
 void onUpload(AsyncWebServerRequest *request, String filename, size_t index,
@@ -271,40 +272,46 @@ void captiveServer()
 {
   server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
     int params = request->params();
+    StaticJsonDocument<192> doc;
+    char output[192] = {'\0'};
     for (int i = 0; i < params; i++) {
       AsyncWebParameter *p = request->getParam(i);
-      DBG("POST: %s, size: %u %s\n", p->name().c_str(), p->size(),
-          p->value().c_str());
       if (p->isPost()) {
         // HTTP POST ssid value
         if (p->name() == "ssid") {
           ssid = p->value().c_str();
-          Serial.print("SSID set to: ");
-          Serial.println(ssid);
+          DBG("SSID set to: %s\n", ssid.c_str());
         }
         if (p->name() == "pass") {
           pass = p->value().c_str();
-          Serial.print("Password set to: ");
-          Serial.println(pass);
+          DBG("Password set to: %s\n", pass.c_str());
         }
         if (p->name() == "server") {
-          String url = p->value().c_str();
-          writeFile(SPIFFS, mqtt_server, url.c_str());
+          doc["s"] = p->value().c_str();
         }
-        if (p->name() == "token") {
-          String token = p->value().c_str();
-          writeFile(SPIFFS, mqtt_token, token.c_str());
+        if (p->name() == "mqtt_pass") {
+          doc["pass"] = p->value().c_str();
+        }
+        if (p->name() == "user") {
+          doc["u"] = p->value().c_str();
+        }
+        if (p->name() == "port") {
+          doc["port"] = p->value().c_str();
         }
       }
     }
+    serializeJson(doc, output);
+    DBG("%s\n", output);
+    writeFile(SPIFFS, p_mqtt, output);
+
     WiFi.persistent(true);
     WiFi.begin(ssid.c_str(), pass.c_str());
-    Serial.print("Connecting to WiFi ..");
+    DBG("Connecting to WiFi ..");
     while (WiFi.status() != WL_CONNECTED) {
       Serial.print('.');
       delay(100);
     }
-    Serial.println("connected");
+    DBG("Connected\n");
     restart.once_ms(1000, espRestart);
     request->redirect("http://" + WiFi.localIP().toString());
   });
@@ -317,13 +324,14 @@ String readFile(fs::FS &fs, const char *path)
 
   File file = fs.open(path);
   if (!file || file.isDirectory()) {
-    Serial.println("- failed to open file for reading");
+    DBG("- failed to open file for reading\n");
     return String();
   }
 
   String fileContent;
   while (file.available()) {
     fileContent = file.readStringUntil('\n');
+    DBG("Read: %s\n", fileContent.c_str());
     break;
   }
   return fileContent;
@@ -488,7 +496,7 @@ void sendData()
 
   mqttClient.publish(topic, 0, false, payload, strlen(payload));
 
-  DBG("Publish: %s", payload);
+  DBG("Publish: %s\n", payload);
 
   current   = 0;
   instPower = 0;
@@ -739,9 +747,25 @@ void pinInit()
   digitalWrite(LED_B, HIGH);
 }
 
+void onMqttConnect(bool sessionPresent)
+{
+  Serial.println("Connected to MQTT.");
+  Serial.print("Session present: ");
+  Serial.println(sessionPresent);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
+{
+  DBG("Disconnected from MQTT, reason: %u\n", reason);
+
+  if (WiFi.isConnected()) {
+    xTimerStart(mqttReconnectTimer, 0);
+  }
+}
+
 void connectToMqtt()
 {
-  Serial.println("Connecting to MQTT...");
+  DBG("Connecting to MQTT...\n");
   mqttClient.connect();
 }
 
@@ -753,7 +777,7 @@ void WiFiEvent(WiFiEvent_t event)
     Serial.println("WiFi connected");
     Serial.println("IP address: ");
     Serial.println(WiFi.localIP());
-    connectToMqtt();
+    // connectToMqtt();
     break;
   case SYSTEM_EVENT_STA_DISCONNECTED:
     Serial.println("WiFi lost connection");
@@ -854,6 +878,42 @@ void setup()
   } else {
     Serial.printf("WiFi Connected!\n");
     Serial.println(WiFi.localIP());
+
+    char input[192] = {'\0'};
+    sprintf(input, "%s", readFile(SPIFFS, p_mqtt).c_str());
+
+    StaticJsonDocument<64> doc;
+    DeserializationError error = deserializeJson(doc, input);
+
+    if (error) {
+      DBG("deserializeJson() failed: %s\n", error.c_str());
+      return;
+    }
+
+    const char *u = doc["u"];
+    const char *s = doc["s"];          // "adafruitojdfoisdjfosdijfoi.com"
+    const char *p = doc["pass"];       // "12345678123456781234567812345678"
+    mqtt_port     = atoi(doc["port"]); // 9999
+
+    strcpy(mqtt_user, u);
+    strcpy(mqtt_pass, p);
+    strcpy(mqtt_server, s);
+
+    DBG("MQTT: %s %s %s %u\n", mqtt_server, mqtt_user, mqtt_pass, mqtt_port);
+
+    mqttClient.setServer(mqtt_server, 1883);
+    mqttClient.setCredentials(mqtt_user, mqtt_pass);
+
+    DBG("%u %u\n", strlen("io.adafruit.com"), strlen(mqtt_server));
+    DBG("%u %u\n", strlen("lbispo"), strlen(mqtt_user));
+    DBG("%u %u\n", strlen("aio_gVBm441qvDCpoNMLio9ZUu6Ms60j"),
+        strlen(mqtt_pass));
+
+    // mqttClient.setServer("io.adafruit.com", 1883);
+    // mqttClient.setCredentials("lbispo", "aio_gVBm441qvDCpoNMLio9ZUu6Ms60j");
+    mqttClient.onConnect(onMqttConnect);
+    mqttClient.onDisconnect(onMqttDisconnect);
+    connectToMqtt();
 
     // https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/ResetReason/ResetReason.ino
     esp_reset_reason_t reset_reason = esp_reset_reason();
