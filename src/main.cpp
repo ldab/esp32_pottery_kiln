@@ -387,7 +387,8 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 // }
 
 // temperature, rate, hold/soak (min)
-int segments[4][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+int segments[4][3]     = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+const char *p_segments = "/segments.txt";
 
 // BLYNK_WRITE(V11) { segments[0][0] = param.asInt(); }
 // BLYNK_WRITE(V21) { segments[0][1] = param.asInt(); }
@@ -411,67 +412,118 @@ int segments[4][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 // BLYNK_WRITE(V9) { currentSetpoint = param.asFloat(); }
 // BLYNK_WRITE(V50) { step = param.asInt(); }
 
-// BLYNK_WRITE(V10)
-// {
-//   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
-//     Blynk.virtualWrite(11 + i * 1 + 20, segments[i][2]);
-//     for (size_t j = 0; j < sizeof(segments[0]) / (sizeof(int)) - 1; j++) {
-//       // sync pins
-//       Blynk.virtualWrite(11 + i * 1 + j * 10, segments[i][j]);
-//       if (segments[i][j] == 0) {
-//         Blynk.virtualWrite(V10, LOW);
-//         Blynk.logEvent("check", "Check the settings, i: " + String(i) +
-//                                     " j:" + String(j));
-//         return;
-//       }
-//     }
-//   }
+void onFire(AsyncWebServerRequest *request)
+{
+  int params = request->params();
 
-//   if (/*segments[3][0] < segments[2][0] ||*/ segments[2][0] < segments[1][0]
-//   ||
-//       segments[1][0] < segments[0][0]) {
-//     Blynk.virtualWrite(V10, LOW);
-//     Blynk.logEvent("check", "Invalid Target temperature");
-//     return;
-//   }
+  for (int i = 0; i < params; i++) {
+    AsyncWebParameter *p = request->getParam(i);
+    if (p->isPost()) {
 
-//   // TODO confirm values as not pressing "enter" does funny things
+      DBG("POST: %s\n", p->name().c_str());
 
-//   int pinValue = param.asInt();
-//   if (pinValue) {
-//     initMillis = millis();
-//     int tTotal = (segments[0][0] - temp) / segments[0][1] * 60 +
-//     segments[0][2]; tTotal += (segments[1][0] - segments[0][0]) * 60 /
-//     segments[1][1] +
-//               segments[1][2];
-//     tTotal += (segments[2][0] - segments[1][0]) * 60 / segments[2][1] +
-//               segments[2][2];
-//     tTotal += (segments[3][0] - segments[2][0]) * 60 / segments[3][1] +
-//               segments[3][2];
+      if (p->name() == "s00")
+        segments[0][0] = p->value().toInt();
+      if (p->name() == "s01")
+        segments[0][1] = p->value().toInt();
+      if (p->name() == "s02")
+        segments[0][2] = p->value().toInt();
+      if (p->name() == "s10")
+        segments[1][0] = p->value().toInt();
+      if (p->name() == "s11")
+        segments[1][1] = p->value().toInt();
+      if (p->name() == "s12")
+        segments[1][2] = p->value().toInt();
+      if (p->name() == "s20")
+        segments[2][0] = p->value().toInt();
+      if (p->name() == "s21")
+        segments[2][1] = p->value().toInt();
+      if (p->name() == "s22")
+        segments[2][2] = p->value().toInt();
+      if (p->name() == "s30")
+        segments[3][0] = p->value().toInt();
+      if (p->name() == "s31")
+        segments[3][1] = p->value().toInt();
+      if (p->name() == "s32")
+        segments[3][2] = p->value().toInt();
+    }
+  }
 
-//     DBG("tTotal %dmin\n", tTotal);
+  for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
+    for (size_t j = 0; j < sizeof(segments[0]) / (sizeof(int)) - 1; j++) {
+      if (segments[i][j] == 0) {
+        DBG("Check the settings, i: %u j: %u\n", i, j);
+        return;
+      }
+    }
+  }
 
-//     Blynk.setProperty(V5, "max", tTotal);
-//     Blynk.setProperty(V0, "max", segments[3][0]);
-//     Blynk.virtualWrite(V7, "Firing 🔥 @" + String(segments[step][0]) + "°C");
+  if (/*segments[3][0] < segments[2][0] ||*/ segments[2][0] < segments[1][0] ||
+      segments[1][0] < segments[0][0]) {
+    DBG("Invalid Target temperature");
+    return;
+  }
 
-//     printSegments();
-//     rampRate();
-//     controlTimer.attach_ms(5530L, tControl);
-//     rampTimer.attach_ms(RATEUPDATE * 1000L, rampRate);
-//   } else {
-//     DBG("Button pressed, disable temp control\n");
-//     Blynk.virtualWrite(V7, "Idle 💤");
-//     // ESP.restart();
-//     digitalWrite(RELAY, LOW);
-//     led.off();
-//     step            = 0;
-//     holdMillis      = 0;
-//     currentSetpoint = -9999;
-//     controlTimer.detach();
-//     rampTimer.detach();
-//   }
-// }
+  StaticJsonDocument<384> doc;
+  char output[384]   = {'\0'};
+
+  JsonObject preheat = doc.createNestedObject("preheat");
+  preheat["st"]      = segments[0][0];
+  preheat["r"]       = segments[0][1];
+  preheat["h"]       = segments[0][2];
+
+  JsonObject step1   = doc.createNestedObject("step1");
+  step1["st"]        = segments[1][0];
+  step1["r"]         = segments[1][1];
+  step1["h"]         = segments[1][2];
+
+  JsonObject step2   = doc.createNestedObject("step2");
+  step2["st"]        = segments[2][0];
+  step2["r"]         = segments[2][1];
+  step2["h"]         = segments[2][2];
+
+  JsonObject final   = doc.createNestedObject("final");
+  final["st"]        = segments[3][0];
+  final["r"]         = segments[3][1];
+  final["h"]         = segments[3][2];
+
+  serializeJson(doc, output);
+  writeFile(SPIFFS, p_segments, output);
+
+  // int pinValue = param.asInt();
+
+  if (true) {
+    initMillis = millis();
+    int tTotal = (segments[0][0] - temp) / segments[0][1] * 60 + segments[0][2];
+    tTotal += (segments[1][0] - segments[0][0]) * 60 / segments[1][1] +
+              segments[1][2];
+    tTotal += (segments[2][0] - segments[1][0]) * 60 / segments[2][1] +
+              segments[2][2];
+    tTotal += (segments[3][0] - segments[2][0]) * 60 / segments[3][1] +
+              segments[3][2];
+
+    DBG("tTotal %dmin\n", tTotal);
+
+    // Blynk.setProperty(V5, "max", tTotal);
+    // Blynk.setProperty(V0, "max", segments[3][0]);
+    // Blynk.virtualWrite(V7, "Firing 🔥 @" + String(segments[step][0]) + "°C");
+
+    printSegments();
+    rampRate();
+    controlTimer.attach_ms(5530L, tControl);
+    rampTimer.attach_ms(RATEUPDATE * 1000L, rampRate);
+  } else {
+    DBG("Button pressed, disable temp control\n");
+    // Blynk.virtualWrite(V7, "Idle 💤");
+    // ESP.restart();
+    digitalWrite(RELAY, LOW);
+    step            = 0;
+    holdMillis      = 0;
+    currentSetpoint = -9999;
+    controlTimer.detach();
+    rampTimer.detach();
+  }
+}
 
 void sendData()
 {
@@ -944,7 +996,16 @@ void setup()
       request->send_P(200, "text/html", HTTP_INDEX, processor);
     });
 
+    server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
+      onFire(request);
+      request->send_P(200, "text/html", HTTP_INDEX, processor);
+    });
+
     server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *request) {
+      request->send_P(200, "text/html", HTTP_SETUP, processor);
+    });
+
+    server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send_P(200, "text/html", HTTP_CONFIG, processor);
     });
 
@@ -957,7 +1018,6 @@ void setup()
     });
 
     server.on("/notify", HTTP_GET, [](AsyncWebServerRequest *request) {
-      notify("hi", strlen("hi"));
       request->send_P(200, "text/plain", "OK");
     });
 

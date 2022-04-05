@@ -18,6 +18,7 @@ const char HTTP_INDEX[] PROGMEM = R"rawliteral(
       <h4>Output - GPIO 2</h4>
       <label class="switch"><input type="checkbox" onchange="toggleCheckbox(this)" id="2" checked><span class="slider"></span></label><br /><br />
       <form action='/setup' method='get'><button>Setup</button></form><br />
+      <form action='/config' method='get'><button>Config</button></form><br />
       <form action='/update' method='get'><button>Update</button></form><br />
       <script>
         %INDEX_JS%
