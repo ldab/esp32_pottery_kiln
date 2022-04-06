@@ -8,4 +8,4 @@
 #include "ota.h"
 #include "setup.h"
 
-const char HTML_HEAD_TITLE[] PROGMEM = "Toilety";
+const char HTML_HEAD_TITLE[] PROGMEM = "KILN";

@@ -8,6 +8,39 @@ function toggleCheckbox(element) {
   xhr.send();
 }
 
+document.addEventListener('DOMContentLoaded', function () {
+        const chart = Highcharts.chart('container', {
+            chart: {
+                type: 'spline'
+            },
+            title: {
+                text: ''
+            },
+            xAxis: {
+              labels: {
+                enabled: false
+              }
+            },
+            yAxis: {
+                title: {
+                    text: ''
+                },
+            },           
+            plotOptions: {
+                series: {
+                    marker: {
+                        enabled: false
+                    }
+                }
+            },
+            series: [{
+                name: 'Jane',
+                data: [1, 0, 4],
+                showInLegend: false
+            }]
+        });
+    });
+
 window.addEventListener('load', getReadings);
 
 function getReadings(){

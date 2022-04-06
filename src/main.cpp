@@ -685,6 +685,9 @@ void getTemp()
   } else {
     tErr = false;
     DBG("T: %.02fdegC\n", temp);
+    char msg[8];
+    sprintf(msg, "%.01f", temp);
+    events.send(msg, "temperature");
   }
 }
 

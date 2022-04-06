@@ -15,11 +15,11 @@ const char HTTP_INDEX[] PROGMEM = R"rawliteral(
     <div class="wrap">
       <h2>%HTML_HEAD_TITLE%</h2>
       <h3>Temp: <span id="temperature"></span> &degC</h3>
-      <h4>Output - GPIO 2</h4>
-      <label class="switch"><input type="checkbox" onchange="toggleCheckbox(this)" id="2" checked><span class="slider"></span></label><br /><br />
+      <div id="container" style="width:100%%; height:200px;"></div>
       <form action='/setup' method='get'><button>Setup</button></form><br />
       <form action='/config' method='get'><button>Config</button></form><br />
       <form action='/update' method='get'><button>Update</button></form><br />
+      <script src="https://code.highcharts.com/highcharts.js"></script>
       <script>
         %INDEX_JS%
       </script>
