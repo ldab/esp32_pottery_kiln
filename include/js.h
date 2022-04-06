@@ -8,40 +8,53 @@ function toggleCheckbox(element) {
   xhr.send();
 }
 
-document.addEventListener('DOMContentLoaded', function () {
-        const chart = Highcharts.chart('container', {
-            chart: {
-                type: 'spline'
-            },
-            title: {
-                text: ''
-            },
-            xAxis: {
-              labels: {
+Highcharts.setOptions({
+    time: {
+        timezone: 'Europe/Stockholm'
+    }
+});
+
+const chart = Highcharts.chart('container', {
+    chart: {
+        type: 'spline'
+    },
+    title: {
+        text: ''
+    },
+    xAxis: {
+      type: 'datetime',
+      labels: {
+        enabled: false
+      }
+    },
+    yAxis: {
+        title: {
+            text: ''
+        },
+    },           
+    plotOptions: {
+        series: {
+            marker: {
                 enabled: false
-              }
-            },
-            yAxis: {
-                title: {
-                    text: ''
-                },
-            },           
-            plotOptions: {
-                series: {
-                    marker: {
-                        enabled: false
-                    }
-                }
-            },
-            series: [{
-                name: 'Jane',
-                data: [1, 0, 4],
-                showInLegend: false
-            }]
-        });
-    });
+            }
+        }
+    },
+    series: [{
+        name: 'T',
+        showInLegend: false
+    }]
+});
 
 window.addEventListener('load', getReadings);
+
+function plotTemperature(t) {
+
+  var x = (new Date()).getTime();
+  // console.log(x);
+  // console.log(t);
+
+  chart.series[0].addPoint([x, t]);
+}
 
 function getReadings(){
   var xhr = new XMLHttpRequest();
@@ -74,8 +87,9 @@ if (!!window.EventSource) {
   }, false);
   
   source.addEventListener('temperature', function(e) {
-    console.log("temperature", e.data);
+    // console.log("temperature", e.data);
     document.getElementById("temperature").innerHTML = e.data;
+    plotTemperature(parseFloat(e.data));
   }, false);
 }
 
