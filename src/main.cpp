@@ -257,14 +257,58 @@ String processor(const String &var)
   if (var == "HTML_INFO_BOX") {
     String ret = "";
     if (WiFi.isConnected()) {
-      ret = "<strong> Connected</ strong> to ubx<br><em><small> with IP ";
+      ret = "<strong> Connected</ strong> to ";
+      ret += WiFi.SSID();
+      ret += "<br><em><small> with IP ";
       ret += WiFi.localIP().toString();
       ret += "</small>";
     } else
       ret = "<strong> Not Connected</ strong>";
-
     return ret;
   }
+  if (var == "UPTIME") {
+    String ret = String(millis() / 1000 / 60);
+    ret += " min ";
+    ret += String((millis() / 1000) % 60);
+    ret += " sec";
+    return ret;
+  }
+  if (var == "CHIP_ID") {
+    String ret = String((uint32_t)ESP.getEfuseMac());
+    return ret;
+  }
+  if (var == "FREE_HEAP") {
+    String ret = String(ESP.getFreeHeap());
+    ret += " bytes";
+    return ret;
+  }
+  if (var == "SKETCH_INFO") {
+    //%USED_BYTES% / &FLASH_SIZE&<br><progress value="%USED_BYTES%"
+    // max="&FLASH_SIZE&">
+    String ret = String(ESP.getSketchSize());
+    ret += " / ";
+    ret += String(ESP.getFlashChipSize());
+    ret += "<br><progress value=\"";
+    ret += String(ESP.getSketchSize());
+    ret += "\" max=\"";
+    ret += String(ESP.getFlashChipSize());
+    ret += "\">";
+    DBG("%s\n", ret.c_str());
+    return ret;
+  }
+  if (var == "HOSTNAME")
+    return String(WiFi.getHostname());
+  if (var == "MY_MAC")
+    return WiFi.macAddress();
+  if (var == "FW_VER")
+    return String(FIRMWARE_VERSION);
+  if (var == "SDK_VER")
+    return String(esp_get_idf_version());
+  if (var == "ABOUT_DATE") {
+    String ret = String(__DATE__) + " " + String(__TIME__);
+    return ret;
+  }
+
   return String();
 }
 
@@ -964,8 +1008,6 @@ void setup()
     DBG("%u %u\n", strlen("aio_gVBm441qvDCpoNMLio9ZUu6Ms60j"),
         strlen(mqtt_pass));
 
-    // mqttClient.setServer("io.adafruit.com", 1883);
-    // mqttClient.setCredentials("lbispo", "aio_gVBm441qvDCpoNMLio9ZUu6Ms60j");
     mqttClient.onConnect(onMqttConnect);
     mqttClient.onDisconnect(onMqttDisconnect);
     connectToMqtt();
