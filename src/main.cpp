@@ -46,8 +46,8 @@ extern "C" {
 
 #include "html_strings.h"
 
-#define PAPERTRAIL_HOST "something"
-#define PAPERTRAIL_PORT 80
+#define PAPERTRAIL_HOST "logs2.papertrailapp.com"
+#define PAPERTRAIL_PORT 53139
 
 #ifdef VERBOSE
 #define DBG(msg, ...)                                                          \
@@ -101,9 +101,11 @@ String ssid, pass;
 float temp;
 float tInt;
 float currentSetpoint = -9999;
+std::vector<float> readings;
 volatile float instPower;
 volatile float energy = 0;
 volatile float current;
+bool clientReconnected         = false;
 
 // Control variables
 volatile uint32_t energyMillis = 0;
@@ -160,6 +162,13 @@ class CaptiveRequestHandler : public AsyncWebHandler
 };
 
 void espRestart() { ESP.restart(); }
+
+void sendGraph(uint32_t i)
+{
+  char msg[8];
+  sprintf(msg, "%.01f", readings[i]);
+  events.send(msg, "temperature");
+}
 
 // Send notification to HA, max 32 bytes
 void notify(char *msg, size_t length)
@@ -245,9 +254,6 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 
 String processor(const String &var)
 {
-  Serial.print("processor:");
-  Serial.println(var);
-
   if (var == "CSS_TEMPLATE")
     return FPSTR(HTTP_STYLE);
   if (var == "INDEX_JS")
@@ -293,7 +299,6 @@ String processor(const String &var)
     ret += "\" max=\"";
     ret += String(ESP.getFlashChipSize());
     ret += "\">";
-    DBG("%s\n", ret.c_str());
     return ret;
   }
   if (var == "HOSTNAME")
@@ -606,14 +611,14 @@ void safetyCheck()
   static bool tIntError  = false;
   static bool noRlyError = false;
 
-  if (true /*controlTimer.active()*/) {
-    if (temp > (currentSetpoint + 10)) // TODO check differential
-    {
-      DBG("HIGH TEMPERATURE ALARM\n");
-    } else if (temp < (currentSetpoint - 20)) {
-      DBG("LOW TEMPERATURE ALARM\n");
-    }
-  }
+  // if (controlTimer.active()) {
+  //   if (temp > (currentSetpoint + 10)) // TODO check differential
+  //   {
+  //     DBG("HIGH TEMPERATURE ALARM\n");
+  //   } else if (temp < (currentSetpoint - 20)) {
+  //     DBG("LOW TEMPERATURE ALARM\n");
+  //   }
+  // }
 
   if (tInt > 60) {
     if (!tIntError) {
@@ -727,10 +732,19 @@ void getTemp()
       digitalWrite(RELAY, LOW);
     }
   } else {
-    tErr = false;
+    static uint32_t log = millis();
+    tErr                = false;
     DBG("T: %.02fdegC\n", temp);
+
     char msg[8];
-    sprintf(msg, "%.01f", temp);
+    sprintf(msg, "%d", WiFi.RSSI());
+
+    if ((millis() - log) > (1000)) {
+      readings.push_back(WiFi.RSSI() / 1.0);
+      DBG("strlen: %lu\n", readings.size());
+      log = millis();
+    }
+
     events.send(msg, "temperature");
   }
 }
@@ -846,12 +860,7 @@ void pinInit()
   digitalWrite(LED_B, HIGH);
 }
 
-void onMqttConnect(bool sessionPresent)
-{
-  Serial.println("Connected to MQTT.");
-  Serial.print("Session present: ");
-  Serial.println(sessionPresent);
-}
+void onMqttConnect(bool sessionPresent) { DBG("Connected to MQTT.\n"); }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
@@ -873,9 +882,6 @@ void WiFiEvent(WiFiEvent_t event)
   Serial.printf("[WiFi-event] event: %d\n", event);
   switch (event) {
   case SYSTEM_EVENT_STA_GOT_IP:
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
     // connectToMqtt();
     break;
   case SYSTEM_EVENT_STA_DISCONNECTED:
@@ -932,6 +938,8 @@ void setup()
   DBG("VERSION %s\n", FIRMWARE_VERSION);
 #endif
 
+  readings.reserve(2000);
+
 #ifdef CALIBRATE
   // Measure GPIO in order to determine Vref to gpio 25 or 26 or 27
   adc2_vref_to_gpio(GPIO_NUM_25);
@@ -975,8 +983,7 @@ void setup()
     server.addHandler(new CaptiveRequestHandler())
         .setFilter(ON_AP_FILTER); // only when requested from AP
   } else {
-    Serial.printf("WiFi Connected!\n");
-    Serial.println(WiFi.localIP());
+    DBG("WiFi Connected, IP: %s\n", WiFi.localIP().toString().c_str());
 
     char input[192] = {'\0'};
     sprintf(input, "%s", readFile(SPIFFS, p_mqtt).c_str());
@@ -998,15 +1005,8 @@ void setup()
     strcpy(mqtt_pass, p);
     strcpy(mqtt_server, s);
 
-    DBG("MQTT: %s %s %s %u\n", mqtt_server, mqtt_user, mqtt_pass, mqtt_port);
-
     mqttClient.setServer(mqtt_server, 1883);
     mqttClient.setCredentials(mqtt_user, mqtt_pass);
-
-    DBG("%u %u\n", strlen("io.adafruit.com"), strlen(mqtt_server));
-    DBG("%u %u\n", strlen("lbispo"), strlen(mqtt_user));
-    DBG("%u %u\n", strlen("aio_gVBm441qvDCpoNMLio9ZUu6Ms60j"),
-        strlen(mqtt_pass));
 
     mqttClient.onConnect(onMqttConnect);
     mqttClient.onDisconnect(onMqttDisconnect);
@@ -1027,13 +1027,9 @@ void setup()
     server.addHandler(&events);
 
     events.onConnect([](AsyncEventSourceClient *client) {
-      if (client->lastId()) {
-        Serial.printf(
-            "Client reconnected! Last message ID that it got is: %u\n",
-            client->lastId());
-      }
-      // send event with message "hello!", id current millis
-      // and set reconnect delay to 1 second
+      DBG("Client connected!\n");
+      clientReconnected = true;
+
       client->send("hello!", NULL, millis(), 10000);
     });
 
@@ -1171,6 +1167,17 @@ void loop()
 {
   if (WiFi.getMode() == WIFI_MODE_AP || WiFi.getMode() == WIFI_MODE_APSTA)
     dnsServer.processNextRequest();
+
+  if (clientReconnected) {
+    static uint32_t i = 0;
+    sendGraph(i);
+    yield();
+    if (i++ > readings.size()) {
+      clientReconnected = false;
+      DBG("i: %u\n", i);
+      i = 0;
+    }
+  }
 
   // ArduinoOTA.handle();
 }

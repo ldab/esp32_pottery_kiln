@@ -53,7 +53,8 @@ function plotTemperature(t) {
   // console.log(x);
   // console.log(t);
 
-  chart.series[0].addPoint([x, t]);
+  // chart.series[0].addPoint([x, t]);
+  chart.series[0].addPoint(t);
 }
 
 function getReadings(){
