@@ -21,6 +21,7 @@ extern "C" {
 #include <AsyncMqttClient.h>
 
 #include <Ticker.h>
+#include <pthread.h>
 
 #include <DNSServer.h>
 #include <ESPmDNS.h>
@@ -105,7 +106,6 @@ std::vector<float> readings;
 volatile float instPower;
 volatile float energy = 0;
 volatile float current;
-bool clientReconnected         = false;
 
 // Control variables
 volatile uint32_t energyMillis = 0;
@@ -121,6 +121,7 @@ Ticker slowCool;
 Ticker tempTimer;
 Ticker sendTimer;
 Ticker restart;
+pthread_t graphThread;
 
 DNSServer dnsServer;
 
@@ -163,55 +164,24 @@ class CaptiveRequestHandler : public AsyncWebHandler
 
 void espRestart() { ESP.restart(); }
 
-void sendGraph(uint32_t i)
+void *sendGraph(void *)
 {
   char msg[8];
-  sprintf(msg, "%.01f", readings[i]);
-  events.send(msg, "temperature");
+  for (uint16_t i = 0; i < readings.size(); i++) {
+    sprintf(msg, "%.01f", readings[i]);
+    events.send(msg, "temperature");
+    DBG("%u", i);
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  pthread_exit(NULL);
 }
 
 // Send notification to HA, max 32 bytes
 void notify(char *msg, size_t length)
 {
   char topic[64] = {'\0'};
-  sprintf(topic, "%s/g/kiln/json", mqtt_user);
+  sprintf(topic, "%s/f/kiln/notify", mqtt_user);
   mqttClient.publish(topic, 0, false, msg, length);
-  // HTTPClient http;
-  // WiFiClientSecure client;
-
-  // // client.setCACert(CA_CERT);
-  // client.setInsecure();
-  // if (!client.connect(url.c_str(), 8123, 4000)) {
-  //   DBG("Connection failed!\n");
-  // } else {
-  //   DBG("Connected!\n");
-  //   char _msg[32];
-  //   client.println("POST /api/services/notify/notify HTTP/1.1");
-  //   client.print("Host: ");
-  //   client.println(url);
-  //   client.println("Content-Type: application/json");
-  //   client.print("Content-Length: ");
-  //   client.printf("%u\n", length + 15);
-  //   client.print("Authorization: Bearer ");
-  //   client.println(token);
-  //   client.println();
-  //   sprintf(_msg, "{\"message\": \"%s\"}\n", msg);
-  //   client.println(_msg);
-  //   DBG("%s\n", _msg);
-
-  //   while (client.connected()) {
-  //     String line = client.readStringUntil('\n');
-  //     if (line.endsWith("OK\r\n"))
-  //       Serial.println(line);
-  //     if (line == "\r")
-  //       break;
-  //   }
-
-  //   while (client.available())
-  //     client.read();
-
-  //   client.stop();
-  // }
 }
 
 void onUpload(AsyncWebServerRequest *request, String filename, size_t index,
@@ -1028,7 +998,11 @@ void setup()
 
     events.onConnect([](AsyncEventSourceClient *client) {
       DBG("Client connected!\n");
-      clientReconnected = true;
+
+      pthread_attr_t attr;
+      pthread_attr_init(&attr);
+      pthread_attr_setstacksize(&attr, 16384);
+      pthread_create(&graphThread, &attr, sendGraph, NULL);
 
       client->send("hello!", NULL, millis(), 10000);
     });
@@ -1167,17 +1141,6 @@ void loop()
 {
   if (WiFi.getMode() == WIFI_MODE_AP || WiFi.getMode() == WIFI_MODE_APSTA)
     dnsServer.processNextRequest();
-
-  if (clientReconnected) {
-    static uint32_t i = 0;
-    sendGraph(i);
-    yield();
-    if (i++ > readings.size()) {
-      clientReconnected = false;
-      DBG("i: %u\n", i);
-      i = 0;
-    }
-  }
 
   // ArduinoOTA.handle();
 }
