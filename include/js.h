@@ -41,6 +41,7 @@ const chart = Highcharts.chart('container', {
     },
     series: [{
         name: 'T',
+        data: %GRAPH_DATA%,
         showInLegend: false
     }]
 });

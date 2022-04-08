@@ -20,6 +20,7 @@ extern "C" {
 
 #include <AsyncMqttClient.h>
 
+#include "esp_system.h"
 #include <Ticker.h>
 #include <pthread.h>
 
@@ -170,10 +171,9 @@ void *sendGraph(void *)
   for (uint16_t i = 0; i < readings.size(); i++) {
     sprintf(msg, "%.01f", readings[i]);
     events.send(msg, "temperature");
-    DBG("%u", i);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
-  pthread_exit(NULL);
+  // pthread_exit(NULL);
 }
 
 // Send notification to HA, max 32 bytes
@@ -282,6 +282,18 @@ String processor(const String &var)
   if (var == "ABOUT_DATE") {
     String ret = String(__DATE__) + " " + String(__TIME__);
     return ret;
+  }
+  if (var == "GRAPH_DATA") {
+    String graphString;
+    graphString.reserve(readings.size());
+    graphString = "[";
+    for (size_t i = 0; i < readings.size() - 1; i++) {
+      graphString += String(readings[i], 0);
+      graphString += ",";
+    }
+    graphString += String(readings[readings.size() - 1], 0);
+    graphString += "]";
+    return graphString;
   }
 
   return String();
@@ -999,10 +1011,11 @@ void setup()
     events.onConnect([](AsyncEventSourceClient *client) {
       DBG("Client connected!\n");
 
-      pthread_attr_t attr;
-      pthread_attr_init(&attr);
-      pthread_attr_setstacksize(&attr, 16384);
-      pthread_create(&graphThread, &attr, sendGraph, NULL);
+      // pthread_attr_t attr;
+      // pthread_attr_init(&attr);
+      // pthread_attr_setstacksize(&attr, 16384);
+      // pthread_create(&graphThread, &attr, sendGraph, NULL);
+      // pthread_detach(graphThread);
 
       client->send("hello!", NULL, millis(), 10000);
     });
