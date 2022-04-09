@@ -48,7 +48,7 @@ input[type='file'] {
 .wrap {
   text-align: left;
   display: inline-block;
-  min-width: 260px;
+  min-width: 360px;
   max-width: 500px
 }
 

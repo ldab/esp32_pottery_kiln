@@ -4,6 +4,7 @@ const char HTTP_SETUP[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>%HTML_HEAD_TITLE%</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
