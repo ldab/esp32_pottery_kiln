@@ -46,6 +46,8 @@ extern "C" {
 
 #include "Adafruit_MAX31855.h"
 
+#include "time.h"
+
 #include "html_strings.h"
 
 #define PAPERTRAIL_HOST "logs2.papertrailapp.com"
@@ -104,6 +106,7 @@ float temp;
 float tInt;
 float currentSetpoint = -9999;
 std::vector<float> readings;
+std::vector<long> epocTime;
 volatile float instPower;
 volatile float energy = 0;
 volatile float current;
@@ -285,14 +288,23 @@ String processor(const String &var)
   }
   if (var == "GRAPH_DATA") {
     String graphString;
-    graphString.reserve(readings.size());
+    graphString.reserve(readings.size() * 2);
     graphString = "[";
     for (size_t i = 0; i < readings.size() - 1; i++) {
+      graphString += "[";
+      graphString += String(epocTime[i]);
+      graphString += ",";
       graphString += String(readings[i], 0);
+      graphString += "]";
       graphString += ",";
     }
+    graphString += "[";
+    graphString += String(epocTime[readings.size() - 1]);
+    graphString += ",";
     graphString += String(readings[readings.size() - 1], 0);
     graphString += "]";
+    graphString += "]";
+    Serial.println(graphString);
     return graphString;
   }
 
@@ -721,9 +733,12 @@ void getTemp()
     char msg[8];
     sprintf(msg, "%d", WiFi.RSSI());
 
-    if ((millis() - log) > (1000)) {
+    struct tm timeinfo;
+    if ((millis() - log) > (1000) && getLocalTime(&timeinfo)) {
+      time_t epoc = mktime(&timeinfo);
+      epocTime.push_back((long)epoc);
       readings.push_back(WiFi.RSSI() / 1.0);
-      DBG("strlen: %lu\n", readings.size());
+      DBG("strlen: %u\n", readings.size());
       log = millis();
     }
 
@@ -867,11 +882,8 @@ void WiFiEvent(WiFiEvent_t event)
     // connectToMqtt();
     break;
   case SYSTEM_EVENT_STA_DISCONNECTED:
-    Serial.println("WiFi lost connection");
-    xTimerStop(
-        mqttReconnectTimer,
-        0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
-    xTimerStart(wifiReconnectTimer, 0);
+    xTimerStop(mqttReconnectTimer,
+               0); // don't reconnect to MQTT while reconnecting WiFi
     break;
   }
 }
@@ -921,6 +933,7 @@ void setup()
 #endif
 
   readings.reserve(2000);
+  epocTime.reserve(2000);
 
 #ifdef CALIBRATE
   // Measure GPIO in order to determine Vref to gpio 25 or 26 or 27
@@ -966,6 +979,9 @@ void setup()
         .setFilter(ON_AP_FILTER); // only when requested from AP
   } else {
     DBG("WiFi Connected, IP: %s\n", WiFi.localIP().toString().c_str());
+
+    configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "0.pool.ntp.org",
+                 "1.pool.ntp.org");
 
     char input[192] = {'\0'};
     sprintf(input, "%s", readFile(SPIFFS, p_mqtt).c_str());
@@ -1017,7 +1033,7 @@ void setup()
       // pthread_create(&graphThread, &attr, sendGraph, NULL);
       // pthread_detach(graphThread);
 
-      client->send("hello!", NULL, millis(), 10000);
+      // client->send("hello!", NULL, millis(), 10000);
     });
 
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -1121,7 +1137,6 @@ void setup()
 
   safetyTimer.attach_ms(2115L, safetyCheck);
   sendTimer.attach_ms(10000L, sendData);
-  tempTimer.attach_ms(2000L, getTemp);
 
   // controlTimer = timer.setInterval(5530L, tControl);
   // timer.disable(controlTimer); // enable it after button is pressed

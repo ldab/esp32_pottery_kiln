@@ -16,7 +16,8 @@ Highcharts.setOptions({
 
 const chart = Highcharts.chart('container', {
     chart: {
-        type: 'spline'
+        type: 'spline',
+        zoomType: 'x'
     },
     title: {
         text: ''
@@ -41,12 +42,19 @@ const chart = Highcharts.chart('container', {
     },
     series: [{
         name: 'T',
-        data: %GRAPH_DATA%,
+        data: (function() {        
+          var _d = %GRAPH_DATA%;
+          for (index = 0; index < _d.length; index++)
+          {
+            _d[index][0] = _d[index][0] * 1000;
+          }
+          return _d;
+        }()),
         showInLegend: false
     }]
 });
 
-window.addEventListener('load', getReadings);
+// window.addEventListener('load', getReadings);
 
 function plotTemperature(t) {
 
@@ -54,8 +62,8 @@ function plotTemperature(t) {
   // console.log(x);
   // console.log(t);
 
-  // chart.series[0].addPoint([x, t]);
-  chart.series[0].addPoint(t);
+  chart.series[0].addPoint([x, t]);
+  // chart.series[0].addPoint(t);
 }
 
 function getReadings(){
