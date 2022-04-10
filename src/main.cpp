@@ -191,12 +191,12 @@ void onUpload(AsyncWebServerRequest *request, String filename, size_t index,
               uint8_t *data, size_t len, bool final)
 {
   if (!index) {
-    Serial.printf("Update Start: %s\n", filename.c_str());
+    DBG("Update Start: %s\n", filename.c_str());
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
       Update.printError(Serial);
     }
   }
-  Serial.printf("Progress: %u of %u\r", Update.progress(), Update.size());
+  DBG("Progress: %u of %u\r", Update.progress(), Update.size());
   if (!Update.hasError()) {
     if (Update.write(data, len) != len) {
       Update.printError(Serial);
@@ -204,7 +204,7 @@ void onUpload(AsyncWebServerRequest *request, String filename, size_t index,
   }
   if (final) {
     if (Update.end(true)) {
-      Serial.printf("Update Success: %uB\n", index + len);
+      DBG("Update Success: %uB\n", index + len);
       request->redirect("/");
       restart.once_ms(1000, espRestart);
     } else {
@@ -304,7 +304,6 @@ String processor(const String &var)
     graphString += String(readings[readings.size() - 1], 0);
     graphString += "]";
     graphString += "]";
-    Serial.println(graphString);
     return graphString;
   }
 
@@ -383,17 +382,17 @@ String readFile(fs::FS &fs, const char *path)
 // Write file to SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message)
 {
-  Serial.printf("Writing file: %s\r\n", path);
+  DBG("Writing file: %s\r\n", path);
 
   File file = fs.open(path, FILE_WRITE);
   if (!file) {
-    Serial.println("- failed to open file for writing");
+    DBG("- failed to open file for writing\n");
     return;
   }
   if (file.print(message)) {
-    Serial.println("- file written");
+    DBG("- file written\n");
   } else {
-    Serial.println("- frite failed");
+    DBG("- frite failed\n");
   }
 }
 
@@ -432,22 +431,6 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 // temperature, rate, hold/soak (min)
 int segments[4][3]     = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 const char *p_segments = "/segments.txt";
-
-// BLYNK_WRITE(V11) { segments[0][0] = param.asInt(); }
-// BLYNK_WRITE(V21) { segments[0][1] = param.asInt(); }
-// BLYNK_WRITE(V31) { segments[0][2] = param.asInt(); }
-
-// BLYNK_WRITE(V12) { segments[1][0] = param.asInt(); }
-// BLYNK_WRITE(V22) { segments[1][1] = param.asInt(); }
-// BLYNK_WRITE(V32) { segments[1][2] = param.asInt(); }
-
-// BLYNK_WRITE(V13) { segments[2][0] = param.asInt(); }
-// BLYNK_WRITE(V23) { segments[2][1] = param.asInt(); }
-// BLYNK_WRITE(V33) { segments[2][2] = param.asInt(); }
-
-// BLYNK_WRITE(V14) { segments[3][0] = param.asInt(); }
-// BLYNK_WRITE(V24) { segments[3][1] = param.asInt(); }
-// BLYNK_WRITE(V34) { segments[3][2] = param.asInt(); }
 
 // BLYNK_WRITE(V5) { segments[3][2] = param.asInt() / 60; } TODO initMillis to
 // UNIX
@@ -643,13 +626,13 @@ void printSegments()
 {
   DBG("Firing ");
   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
-    Serial.printf("{");
+    DBG("{");
     for (size_t j = 0; j < sizeof(segments[0]) / (sizeof(int)); j++) {
-      Serial.printf("%d,", segments[i][j]);
+      DBG("%d,", segments[i][j]);
     }
-    Serial.printf("} ");
+    DBG("} ");
   }
-  Serial.printf("\n");
+  DBG("\n");
 }
 
 void IRAM_ATTR readPower()
@@ -876,7 +859,7 @@ void connectToMqtt()
 
 void WiFiEvent(WiFiEvent_t event)
 {
-  Serial.printf("[WiFi-event] event: %d\n", event);
+  DBG("[WiFi-event] event: %d\n", event);
   switch (event) {
   case SYSTEM_EVENT_STA_GOT_IP:
     // connectToMqtt();
@@ -905,10 +888,10 @@ void otaInit()
   });
   ArduinoOTA.onEnd([]() { Serial.println("\nEnd"); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    DBG("Progress: %u%%\r", (progress / (total / 100)));
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
+    DBG("Error[%u]: ", error);
     if (error == OTA_AUTH_ERROR) {
       Serial.println("Auth Failed");
     } else if (error == OTA_BEGIN_ERROR) {
@@ -950,7 +933,7 @@ void setup()
 
   // Initialize SPIFFS
   if (!SPIFFS.begin(true)) {
-    Serial.println("An Error has occurred while mounting SPIFFS");
+    DBG("An Error has occurred while mounting SPIFFS\n");
     return;
   }
 
@@ -962,7 +945,7 @@ void setup()
 
   if (WiFi.waitForConnectResult() == WL_DISCONNECTED ||
       WiFi.waitForConnectResult() == WL_NO_SSID_AVAIL) { //~ 100 * 100ms
-    Serial.printf("WiFi Failed!: %u\n", WiFi.status());
+    DBG("WiFi Failed!: %u\n", WiFi.status());
 
     captiveServer();
 
@@ -1088,10 +1071,8 @@ void setup()
         inputMessage1 = "No message sent";
         inputMessage2 = "No message sent";
       }
-      Serial.print("GPIO: ");
-      Serial.print(inputMessage1);
-      Serial.print(" - Set to: ");
-      Serial.println(inputMessage2);
+      DBG("GPIO: %s - Set to: %s\n", inputMessage1.c_str(),
+          inputMessage2.c_str());
       request->send(200, "text/plain", "OK");
     });
 
