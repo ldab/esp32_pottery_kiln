@@ -117,6 +117,8 @@ uint32_t initMillis            = 0;
 uint32_t holdMillis            = 0;
 int step                       = 0;
 
+String info                    = "Idle 💤";
+
 // Timer instance numbers
 Ticker controlTimer;
 Ticker safetyTimer;
@@ -446,8 +448,6 @@ void onFire(AsyncWebServerRequest *request)
     AsyncWebParameter *p = request->getParam(i);
     if (p->isPost()) {
 
-      DBG("POST: %s\n", p->name().c_str());
-
       if (p->name() == "s00")
         segments[0][0] = p->value().toInt();
       if (p->name() == "s01")
@@ -530,9 +530,7 @@ void onFire(AsyncWebServerRequest *request)
 
     DBG("tTotal %dmin\n", tTotal);
 
-    // Blynk.setProperty(V5, "max", tTotal);
-    // Blynk.setProperty(V0, "max", segments[3][0]);
-    // Blynk.virtualWrite(V7, "Firing 🔥 @" + String(segments[step][0]) + "°C");
+    info = "Firing 🔥 @" + String(segments[step][0]) + "°C";
 
     printSegments();
     rampRate();
@@ -626,13 +624,13 @@ void printSegments()
 {
   DBG("Firing ");
   for (size_t i = 0; i < sizeof(segments) / sizeof(segments[0]); i++) {
-    DBG("{");
+    Serial.print("{");
     for (size_t j = 0; j < sizeof(segments[0]) / (sizeof(int)); j++) {
-      DBG("%d,", segments[i][j]);
+      Serial.printf("%d,", segments[i][j]);
     }
-    DBG("} ");
+    Serial.print("} ");
   }
-  DBG("\n");
+  Serial.print("\n");
 }
 
 void IRAM_ATTR readPower()
@@ -737,16 +735,17 @@ void holdTimer(uint32_t _segment)
     rampTimer.detach();
   }
   uint32_t _elapsed = (millis() - holdMillis) / (60 * 1000);
-  // Blynk.virtualWrite(V7, "Hold: " + String(currentSetpoint, 0) + "°C-" +
-  //                            String(_elapsed) + "/" + String(_segment) +
-  //                            "min");
+  info = "Hold: " + String(currentSetpoint, 0) + "°C-" + String(_elapsed) +
+         "/" + String(_segment) + "min";
+  events.send(info.c_str(), "display");
 
   if (_elapsed >= _segment) {
     step++;
     holdMillis = 0;
     rampTimer.attach_ms(RATEUPDATE * 1000L, rampRate);
     DBG("Done with hold, step: %d\n", step);
-    // Blynk.virtualWrite(V7, "Firing 🔥 @" + String(segments[step][0]) + "°C");
+    info = "Firing 🔥 @" + String(segments[step][0]) + "°C";
+    events.send(info.c_str(), "display");
   }
 }
 
@@ -758,7 +757,8 @@ void rampDown()
     slowCool.detach();
     currentSetpoint = 0;
     tControl();
-    // Blynk.virtualWrite(V7, "Cooling ❄️");
+    info = "Cooling ❄️";
+    events.send(info.c_str(), "display");
   }
 
   currentSetpoint -= (float)(83.0 / (3600.0f / RATEUPDATE));
@@ -797,8 +797,8 @@ void tControl()
         char endInfo[64];
         sprintf(endInfo, "Reached Temp, after: %d:%d", h, m);
         DBG("%s", endInfo);
-        // Blynk.logEvent("info", endInfo);
-        // Blynk.virtualWrite(V7, "Slow Cooling ❄️");
+        info = "Slow Cooling ❄️";
+        events.send(info.c_str(), "display");
         slowCool.attach_ms(RATEUPDATE * 1000L, rampDown);
         rampTimer.detach();
         step++;
@@ -1010,6 +1010,8 @@ void setup()
     events.onConnect([](AsyncEventSourceClient *client) {
       DBG("Client connected!\n");
 
+      events.send(info.c_str(), "display");
+
       // pthread_attr_t attr;
       // pthread_attr_init(&attr);
       // pthread_attr_setstacksize(&attr, 16384);
@@ -1106,9 +1108,6 @@ void setup()
 
     tempTimer.attach(2, getTemp);
   }
-
-  server.onNotFound(onRequest);
-  server.begin();
 
   mqttReconnectTimer =
       xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0,

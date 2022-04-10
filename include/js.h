@@ -101,6 +101,10 @@ if (!!window.EventSource) {
     document.getElementById("temperature").innerHTML = e.data;
     plotTemperature(parseFloat(e.data));
   }, false);
+
+  source.addEventListener('display', function(e) {
+    document.getElementById("display").innerHTML = e.data;
+  }, false);
 }
 
 )rawliteral";
