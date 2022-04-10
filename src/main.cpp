@@ -927,6 +927,10 @@ void setup()
 
   pinInit();
 
+  mqttReconnectTimer =
+      xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0,
+                   reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
+
   WiFi.mode(WIFI_STA);
   WiFi.onEvent(WiFiEvent);
   WiFi.begin();
@@ -1108,10 +1112,6 @@ void setup()
 
     tempTimer.attach(2, getTemp);
   }
-
-  mqttReconnectTimer =
-      xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0,
-                   reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
 
   // otaInit();
 
