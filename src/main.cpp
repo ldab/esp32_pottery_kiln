@@ -1041,14 +1041,7 @@ void setup()
     });
 
     server.on(
-        "/u", HTTP_POST,
-        [](AsyncWebServerRequest *request) {
-          AsyncWebServerResponse *response = request->beginResponse(
-              200, "text/plain", Update.hasError() ? "OK" : "FAIL");
-          response->addHeader("Connection", "close");
-          request->send(response);
-        },
-        onUpload);
+        "/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, onUpload);
 
     server.on("/gpio", HTTP_GET, [](AsyncWebServerRequest *request) {
       String inputMessage1;
