@@ -17,7 +17,7 @@ const char HTTP_INDEX[] PROGMEM = R"rawliteral(
       <h2>%HTML_HEAD_TITLE%</h2>
       <h3>Temp: <span id="temperature"></span> &degC</h3>
       <h3><span id="display"></span></h3>
-      <div id="container" style="width:100%%; height:200px;"></div>
+      <div id="container" style="width:100%%; height:200px;"></div><br />
       <form action='/setup' method='get'><button>Setup</button></form><br />
       <form action='/info' method='get'><button>Info</button></form><br />
       <form action='/config' method='get'><button>Config</button></form><br />

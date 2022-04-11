@@ -185,7 +185,7 @@ void *sendGraph(void *)
 void notify(char *msg, size_t length)
 {
   char topic[64] = {'\0'};
-  sprintf(topic, "%s/f/kiln/notify", mqtt_user);
+  sprintf(topic, "%s/f/notify", mqtt_user);
   mqttClient.publish(topic, 0, false, msg, length);
 }
 
@@ -572,6 +572,7 @@ void sendData()
 
   mqttClient.publish(topic, 0, false, payload, strlen(payload));
 
+  DBG("topic: %s\n", topic);
   DBG("Publish: %s\n", payload);
 
   current   = 0;
@@ -915,8 +916,8 @@ void setup()
   DBG("VERSION %s\n", FIRMWARE_VERSION);
 #endif
 
-  readings.reserve(2000);
-  epocTime.reserve(2000);
+  readings.reserve(1440);
+  epocTime.reserve(1440);
 
 #ifdef CALIBRATE
   // Measure GPIO in order to determine Vref to gpio 25 or 26 or 27
@@ -996,16 +997,6 @@ void setup()
     mqttClient.onConnect(onMqttConnect);
     mqttClient.onDisconnect(onMqttDisconnect);
     connectToMqtt();
-
-    // https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/ResetReason/ResetReason.ino
-    esp_reset_reason_t reset_reason = esp_reset_reason();
-    if (reset_reason == ESP_RST_PANIC || reset_reason == ESP_RST_INT_WDT ||
-        reset_reason == ESP_RST_TASK_WDT || reset_reason == ESP_RST_WDT ||
-        reset_reason == ESP_RST_BROWNOUT) {
-      char rstMsg[12];
-      sprintf(rstMsg, "WDT= %u", reset_reason);
-      // notify(rstMsg, strlen(rstMsg));
-    }
 
     MDNS.begin("kiln");
 
@@ -1111,35 +1102,31 @@ void setup()
     });
 
     tempTimer.attach(2, getTemp);
+    sendTimer.attach_ms(10000L, sendData);
+
+    // https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/ResetReason/ResetReason.ino
+    esp_reset_reason_t reset_reason = esp_reset_reason();
+    if (reset_reason == ESP_RST_PANIC || reset_reason == ESP_RST_INT_WDT ||
+        reset_reason == ESP_RST_TASK_WDT || reset_reason == ESP_RST_WDT ||
+        reset_reason == ESP_RST_BROWNOUT) {
+      errorLog = new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT,
+                                      LogLevel::Error, "\033[0;31m",
+                                      "untrol.io", "kiln");
+
+      char rstMsg[12];
+      sprintf(rstMsg, "RST= %u", reset_reason);
+      DBG("%s\n", rstMsg);
+      errorLog->printf("%s\n", rstMsg);
+
+      notify(rstMsg, strlen(rstMsg));
+
+      // Blynk.syncVirtual(V10);
+    }
   }
 
   // otaInit();
 
   safetyTimer.attach_ms(2115L, safetyCheck);
-  sendTimer.attach_ms(10000L, sendData);
-
-  // controlTimer = timer.setInterval(5530L, tControl);
-  // timer.disable(controlTimer); // enable it after button is pressed
-
-  // rampTimer = timer.setInterval(RATEUPDATE * 1000L, rampRate);
-  // timer.disable(rampTimer); // enable it after button is pressed
-
-  // slowCool = timer.setInterval(RATEUPDATE * 1000L, rampDown);
-  // timer.disable(slowCool);
-
-  esp_reset_reason_t reset_reason = esp_reset_reason();
-  if (reset_reason == ESP_RST_PANIC || reset_reason == ESP_RST_INT_WDT ||
-      reset_reason == ESP_RST_TASK_WDT || reset_reason == ESP_RST_WDT ||
-      reset_reason == ESP_RST_BROWNOUT) {
-    errorLog =
-        new PapertrailLogger(PAPERTRAIL_HOST, PAPERTRAIL_PORT, LogLevel::Error,
-                             "\033[0;31m", "untrol.io", "kiln");
-
-    DBG("Reset Reason [%d]\n", reset_reason);
-    errorLog->printf("Reset Reason [%d]\n", reset_reason);
-
-    // Blynk.syncVirtual(V10);
-  }
 
   server.onNotFound(onRequest);
   server.begin();
