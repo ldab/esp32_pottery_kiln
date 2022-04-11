@@ -1110,7 +1110,6 @@ void setup()
 
       char rstMsg[12];
       sprintf(rstMsg, "RST= %u", reset_reason);
-      DBG("%s\n", rstMsg);
       errorLog->printf("%s\n", rstMsg);
 
       notify(rstMsg, strlen(rstMsg));

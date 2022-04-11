@@ -9,9 +9,9 @@ Connected electric kiln controller -> esp8266, max31855, thermocouple type K, re
 
  ## TODO
 
-- [X] Restore data from cloud;
 - [ ] Temperature Ramp rate monitor;
 - [ ] Cooling monitor;
+- [ ] Cool upload progress: https://codepen.io/takaneichinose/pen/jOWXBBd
 
 ## VOID
 

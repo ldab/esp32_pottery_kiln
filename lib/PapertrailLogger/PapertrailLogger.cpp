@@ -27,7 +27,7 @@ size_t PapertrailLogger::write(uint8_t c) {
     mWifiUdp->write((const uint8_t *) syslogMessage.c_str(), syslogMessage.length());
     mWifiUdp->endPacket();
     // send the message to the Serial port
-    Serial.println((const char *) mBuffer);
+    // Serial.println((const char *) mBuffer);
     mBufferPos = 0;
   } else {
     // buffer the character up for sending later
