@@ -184,6 +184,7 @@ void *sendGraph(void *)
 // Send notification to HA, max 32 bytes
 void notify(char *msg, size_t length)
 {
+  DBG("%s\n", msg);
   char topic[64] = {'\0'};
   sprintf(topic, "%s/f/notify", mqtt_user);
   mqttClient.publish(topic, 0, false, msg, length);
@@ -598,10 +599,9 @@ void safetyCheck()
 
   if (tInt > 60) {
     if (!tIntError) {
-      char tIntChar[8];
-      sprintf(tIntChar, "%.1f°C", tInt);
-      DBG("High internal temp: %s", tIntChar);
-      // Blynk.logEvent("highIntTemp", tIntChar);
+      char tIntChar[32];
+      sprintf(tIntChar, "High internal temp: %.1f°C", tInt);
+      notify(tIntChar, strlen(tIntChar));
       tIntError = true;
     }
   } else {
@@ -611,8 +611,7 @@ void safetyCheck()
   if (digitalRead(RELAY)) {
     if ((millis() - energyMillis) > 2000L) {
       if (!noRlyError) {
-        DBG("PROBLEM 2300W expect 1 pulse every ~1565ms\n");
-        // Blynk.logEvent("noRlyError");
+        notify("noRlyError", strlen("noRlyError"));
         noRlyError = true;
       }
     } else {
@@ -664,8 +663,7 @@ void IRAM_ATTR readPower()
     if (problem == true) {
       char shortError[32];
       sprintf(shortError, "I = %.1fA P = %.1fW", current, instPower);
-      DBG("PROBLEM, current but relay is Off, %s", shortError);
-      // Blynk.logEvent("shortErr", shortError);
+      notify(shortError, strlen(shortError));
     }
 
     problem = true;
@@ -702,8 +700,9 @@ void getTemp()
       temp = NAN;
       tErr = true;
 
-      DBG("Thermocouple error #%i", error);
-      // Blynk.logEvent("thermocouple_error", error);
+      char tcError[24];
+      sprintf(tcError, "Thermocouple error #%i", error);
+      notify(tcError, strlen(tcError));
 
       digitalWrite(RELAY, LOW);
     }
@@ -1039,10 +1038,6 @@ void setup()
 
     server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send_P(200, "text/html", HTTP_UPDATE, processor);
-    });
-
-    server.on("/notify", HTTP_GET, [](AsyncWebServerRequest *request) {
-      request->send_P(200, "text/plain", "OK");
     });
 
     server.on(
