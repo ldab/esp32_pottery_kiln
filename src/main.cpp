@@ -817,7 +817,7 @@ void rampRate()
 void pinInit()
 {
   pinMode(POWER, INPUT);
-  // attachInterrupt(POWER, readPower, FALLING);
+  // attachInterrupt(POWER, readPower, FALLING); //internal SPI on PICO
 
   pinMode(RELAY, OUTPUT);
   digitalWrite(RELAY, LOW);
@@ -932,9 +932,9 @@ void setup()
     return;
   }
 
+  // This function does not return so not true if sensor is faulty
   if (!thermocouple.begin()) {
     DBG("ERROR.\n");
-    // while (1) delay(10);
   } else
     DBG("MAX31855 Good\n");
 
@@ -944,7 +944,7 @@ void setup()
 
     captiveServer();
 
-    WiFi.softAP("esp-captive");
+    WiFi.softAP("myKiln");
 
     server.onNotFound(
         [](AsyncWebServerRequest *request) { request->redirect("/"); });
@@ -994,16 +994,7 @@ void setup()
 
     events.onConnect([](AsyncEventSourceClient *client) {
       DBG("Client connected!\n");
-
       events.send(info.c_str(), "display");
-
-      // pthread_attr_t attr;
-      // pthread_attr_init(&attr);
-      // pthread_attr_setstacksize(&attr, 16384);
-      // pthread_create(&graphThread, &attr, sendGraph, NULL);
-      // pthread_detach(graphThread);
-
-      // client->send("hello!", NULL, millis(), 10000);
     });
 
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
