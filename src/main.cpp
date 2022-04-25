@@ -127,7 +127,6 @@ Ticker slowCool;
 Ticker tempTimer;
 Ticker sendTimer;
 Ticker restart;
-pthread_t graphThread;
 
 DNSServer dnsServer;
 
@@ -146,6 +145,7 @@ TimerHandle_t wifiReconnectTimer;
 void printSegments();
 void rampRate();
 void tControl();
+void getTemp();
 String processor(const String &var);
 String readFile(fs::FS &fs, const char *path);
 void writeFile(fs::FS &fs, const char *path, const char *message);
@@ -388,47 +388,9 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
   }
 }
 
-// BLYNK_CONNECTED()
-// {
-//   String resetReason   = ESP.getResetReason();
-//   uint32_t resetNumber = system_get_rst_info()->reason;
-
-//   if (resetNumber != REASON_DEFAULT_RST && resetNumber != REASON_SOFT_RESTART
-//   &&
-//       resetNumber != REASON_EXT_SYS_RST) {
-//     // Restore data from the cloud
-//     for (size_t i = 11; i < 15; i++) {
-//       Blynk.syncVirtual(i);
-//       for (size_t j = 10; j < 25; j += 10) {
-//         Blynk.syncVirtual(i + j);
-//       }
-//     }
-
-//     Blynk.syncVirtual(V3, V9, V50);
-
-//     // Blynk.syncVirtual(V10);
-
-//     char resetInfo[32];
-//     sprintf(resetInfo, "%s epc1=0x%08x", resetReason.c_str(),
-//             system_get_rst_info()->epc1);
-//     Blynk.logEvent("info", resetInfo);
-//   } else if (!timer.isEnabled(controlTimer)) {
-//     Blynk.virtualWrite(V5, 0);
-//     Blynk.virtualWrite(V10, 0);
-//     Blynk.virtualWrite(V7, "Idle 💤");
-//     led.off();
-//   }
-// }
-
 // temperature, rate, hold/soak (min)
 int segments[4][3]     = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 const char *p_segments = "/segments.txt";
-
-// BLYNK_WRITE(V5) { segments[3][2] = param.asInt() / 60; } TODO initMillis to
-// UNIX
-// BLYNK_WRITE(V3) { energy = param.asFloat(); }
-// BLYNK_WRITE(V9) { currentSetpoint = param.asFloat(); }
-// BLYNK_WRITE(V50) { step = param.asInt(); }
 
 void onFire(AsyncWebServerRequest *request)
 {
@@ -526,9 +488,49 @@ void onFire(AsyncWebServerRequest *request)
   } else {
     DBG("Button pressed, disable temp control\n");
     writeFile(SPIFFS, p_segments, "");
-    delay(500);
-    espRestart();
+    restart.once_ms(1000, espRestart);
   }
+}
+
+void onFire(String input)
+{
+  StaticJsonDocument<384> doc;
+  deserializeJson(doc, input);
+
+  segments[0][0] = doc["preheat"]["st"];
+  segments[0][1] = doc["preheat"]["r"];
+  segments[0][2] = doc["preheat"]["h"];
+  segments[1][0] = doc["step1"]["st"];
+  segments[1][1] = doc["step1"]["r"];
+  segments[1][2] = doc["step1"]["h"];
+  segments[2][0] = doc["step2"]["st"];
+  segments[2][1] = doc["step2"]["r"];
+  segments[2][2] = doc["step2"]["h"];
+  segments[3][0] = doc["final"]["st"];
+  segments[3][1] = doc["final"]["r"];
+  segments[3][2] = doc["final"]["h"];
+
+  getTemp();
+
+  // guess the step
+  // TODO publish retain and account for hold
+  if (temp > segments[3][0])
+    step = 3;
+  else if (temp > segments[1][0])
+    step = 3;
+  else if (temp > segments[1][0])
+    step = 2;
+  else if (temp > segments[0][0])
+    step = 1;
+
+  currentSetpoint = temp;
+
+  info            = "Firing 🔥 @" + String(segments[step][0]) + "°C";
+
+  printSegments();
+  rampRate();
+  controlTimer.attach_ms(5530L, tControl);
+  rampTimer.attach_ms(RATEUPDATE * 1000L, rampRate);
 }
 
 void sendData()
@@ -735,6 +737,7 @@ void rampDown()
     slowCool.detach();
     currentSetpoint = 0;
     tControl();
+    writeFile(SPIFFS, p_segments, "");
     info = "Cooling ❄️";
     events.send(info.c_str(), "display");
   }
@@ -1061,6 +1064,10 @@ void setup()
       errorLog->printf("%s\n", rstMsg);
 
       notify(rstMsg, strlen(rstMsg));
+
+      String segmentRecover = readFile(SPIFFS, p_segments);
+      if (segmentRecover.length())
+        onFire(segmentRecover);
     }
 
     server.onNotFound(onRequest);
