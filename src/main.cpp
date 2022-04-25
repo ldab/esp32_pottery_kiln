@@ -703,7 +703,10 @@ void getTemp()
       log = millis();
     }
 
+    char instPowerString[8];
+    sprintf(instPowerString, "%.01f", instPower);
     events.send(msg, "temperature");
+    events.send(instPowerString, "KW");
   }
 }
 
