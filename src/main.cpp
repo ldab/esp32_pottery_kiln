@@ -448,7 +448,6 @@ void onFire(AsyncWebServerRequest *request)
   for (int i = 0; i < params; i++) {
     AsyncWebParameter *p = request->getParam(i);
     if (p->isPost()) {
-
       if (p->name() == "s00")
         segments[0][0] = p->value().toInt();
       if (p->name() == "s01")
@@ -517,9 +516,7 @@ void onFire(AsyncWebServerRequest *request)
   serializeJson(doc, output);
   writeFile(SPIFFS, p_segments, output);
 
-  // int pinValue = param.asInt();
-
-  if (true) {
+  if (true) { // TODO check disable button
     initMillis = millis();
     int tTotal = (segments[0][0] - temp) / segments[0][1] * 60 + segments[0][2];
     tTotal += (segments[1][0] - segments[0][0]) * 60 / segments[1][1] +
@@ -539,14 +536,9 @@ void onFire(AsyncWebServerRequest *request)
     rampTimer.attach_ms(RATEUPDATE * 1000L, rampRate);
   } else {
     DBG("Button pressed, disable temp control\n");
-    // Blynk.virtualWrite(V7, "Idle 💤");
-    // ESP.restart();
-    digitalWrite(RELAY, LOW);
-    step            = 0;
-    holdMillis      = 0;
-    currentSetpoint = -9999;
-    controlTimer.detach();
-    rampTimer.detach();
+    writeFile(SPIFFS, p_segments, "");
+    delay(500);
+    espRestart();
   }
 }
 
