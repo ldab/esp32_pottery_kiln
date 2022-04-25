@@ -759,12 +759,13 @@ void tControl()
   static uint8_t diff;
 
   if (!isnan(temp)) {
-    // TODO Differential
     float delta_t = currentSetpoint - temp - diff;
     if (delta_t >= 0) {
       if (!digitalRead(RELAY)) {
         digitalWrite(RELAY, HIGH);
-        // timer.restartTimer(safetyTimer);
+        // restart timer so relay have time to pulse
+        safetyTimer.detach();
+        safetyTimer.attach_ms(2115L, safetyCheck);
         diff = 0;
       }
     } else if (digitalRead(RELAY)) {
