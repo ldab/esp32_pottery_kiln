@@ -170,17 +170,6 @@ class CaptiveRequestHandler : public AsyncWebHandler
 
 void espRestart() { ESP.restart(); }
 
-void *sendGraph(void *)
-{
-  char msg[8];
-  for (uint16_t i = 0; i < readings.size(); i++) {
-    sprintf(msg, "%.01f", readings[i]);
-    events.send(msg, "temperature");
-    vTaskDelay(pdMS_TO_TICKS(10));
-  }
-  // pthread_exit(NULL);
-}
-
 // Send notification to HA, max 32 bytes
 void notify(char *msg, size_t length)
 {
@@ -600,7 +589,7 @@ void safetyCheck()
   if (digitalRead(RELAY)) {
     if ((millis() - energyMillis) > 2000L) {
       if (!noRlyError) {
-        notify("noRlyError", strlen("noRlyError"));
+        notify((char *)"noRlyError", strlen("noRlyError"));
         noRlyError = true;
       }
     } else {
@@ -834,7 +823,7 @@ void onMqttConnect(bool sessionPresent) { DBG("Connected to MQTT.\n"); }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-  DBG("Disconnected from MQTT, reason: %u\n", reason);
+  DBG("Disconnected from MQTT, reason: %u\n", (uint8_t)reason);
 
   if (WiFi.isConnected()) {
     xTimerStart(mqttReconnectTimer, 0);
@@ -857,6 +846,8 @@ void WiFiEvent(WiFiEvent_t event)
   case SYSTEM_EVENT_STA_DISCONNECTED:
     xTimerStop(mqttReconnectTimer,
                0); // don't reconnect to MQTT while reconnecting WiFi
+    break;
+  default:
     break;
   }
 }
@@ -1025,24 +1016,6 @@ void setup()
     server.on(
         "/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, onUpload);
 
-    server.on("/gpio", HTTP_GET, [](AsyncWebServerRequest *request) {
-      String inputMessage1;
-      String inputMessage2;
-      // GET input1 value on
-      // <ESP_IP>/gpio?output=<inputMessage1>&state=<inputMessage2>
-      if (request->hasParam("output") && request->hasParam("state")) {
-        inputMessage1 = request->getParam("output")->value();
-        inputMessage2 = request->getParam("state")->value();
-        digitalWrite(inputMessage1.toInt(), inputMessage2.toInt());
-      } else {
-        inputMessage1 = "No message sent";
-        inputMessage2 = "No message sent";
-      }
-      DBG("GPIO: %s - Set to: %s\n", inputMessage1.c_str(),
-          inputMessage2.c_str());
-      request->send(200, "text/plain", "OK");
-    });
-
     server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
       String json = "[";
       int n       = WiFi.scanComplete();
@@ -1088,16 +1061,15 @@ void setup()
       errorLog->printf("%s\n", rstMsg);
 
       notify(rstMsg, strlen(rstMsg));
-
-      // Blynk.syncVirtual(V10);
     }
+
+    server.onNotFound(onRequest);
   }
 
   // otaInit();
 
   safetyTimer.attach_ms(2115L, safetyCheck);
 
-  server.onNotFound(onRequest);
   server.begin();
 }
 
