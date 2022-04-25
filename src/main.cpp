@@ -289,7 +289,7 @@ String processor(const String &var)
     String ret = String(__DATE__) + " " + String(__TIME__);
     return ret;
   }
-  if (var == "GRAPH_DATA") {
+  if (var == "GRAPH_DATA" && readings.size()) {
     String graphString;
     graphString.reserve(readings.size() * 2);
     graphString = "[";
@@ -570,9 +570,6 @@ void sendData()
 
   current   = 0;
   instPower = 0;
-  if (true /*controlTimer.active()*/) {
-    // Blynk.virtualWrite(V5, (int)((millis() - initMillis) / (60 * 1000)));
-  }
 }
 
 void safetyCheck()
@@ -704,13 +701,13 @@ void getTemp()
     DBG("T: %.02fdegC\n", temp);
 
     char msg[8];
-    sprintf(msg, "%d", WiFi.RSSI());
+    sprintf(msg, "%.01f", temp);
 
     struct tm timeinfo;
-    if ((millis() - log) > (1000) && getLocalTime(&timeinfo)) {
+    if ((millis() - log) > (60 * 1000) && getLocalTime(&timeinfo)) {
       time_t epoc = mktime(&timeinfo);
       epocTime.push_back((long)epoc);
-      readings.push_back(WiFi.RSSI() / 1.0);
+      readings.push_back(temp);
       DBG("strlen: %u\n", readings.size());
       log = millis();
     }
@@ -907,6 +904,7 @@ void setup()
   DBG("VERSION %s\n", FIRMWARE_VERSION);
 #endif
 
+  // 1440 samples, every 1 min = 24 hours
   readings.reserve(1440);
   epocTime.reserve(1440);
 
