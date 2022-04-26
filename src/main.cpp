@@ -270,6 +270,8 @@ String processor(const String &var)
     return String(WiFi.getHostname());
   if (var == "MY_MAC")
     return WiFi.macAddress();
+  if (var == "MY_RSSI")
+    return String(WiFi.RSSI());
   if (var == "FW_VER")
     return String(FIRMWARE_VERSION);
   if (var == "SDK_VER")

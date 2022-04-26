@@ -35,13 +35,15 @@ const char HTTP_INFO[] PROGMEM = R"rawliteral(
         <dt>Memory - Free Heap</dt>
         <dd>%FREE_HEAP%</dd>
         <dt>Memory - Sketch Size</dt>
-        <dd>Used / Total bytes<br>%SKETCH_INFO%</progress></dd><br>
+        <dd>Used / Total bytes<br>%SKETCH_INFO%</progress></dd>
         <h3>WiFi</h3>
         <hr>
         <dt>Hostname</dt>
         <dd>%HOSTNAME%</dd>
         <dt>Station MAC</dt>
         <dd>%MY_MAC%</dd>
+        <dt>RSSI</dt>
+        <dd>%MY_RSSI% dBm</dd>
       </dl>
       <h3>About</h3>
       <hr>
