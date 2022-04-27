@@ -50,7 +50,7 @@ const char HTTP_INFO[] PROGMEM = R"rawliteral(
       <dl>
         <dt>Firmware Version</dt>
         <dd>%FW_VER%</dd>
-        <dt>IDF SDK</dt>
+        <dt>Arduino version</dt>
         <dd>%SDK_VER%</dd>
         <dt>Build Date</dt>
         <dd>%ABOUT_DATE%</dd>

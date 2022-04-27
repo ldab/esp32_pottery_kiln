@@ -275,7 +275,9 @@ String processor(const String &var)
   if (var == "FW_VER")
     return String(FIRMWARE_VERSION);
   if (var == "SDK_VER")
-    return String(esp_get_idf_version());
+    return String(ESP_ARDUINO_VERSION_MAJOR) + "." +
+           String(ESP_ARDUINO_VERSION_MINOR) + "." +
+           String(ESP_ARDUINO_VERSION_PATCH);
   if (var == "ABOUT_DATE") {
     String ret = String(__DATE__) + " " + String(__TIME__);
     return ret;
