@@ -699,7 +699,8 @@ void getTemp()
     sprintf(msg, "%.01f", temp);
 
     struct tm timeinfo;
-    if ((millis() - log) > (60 * 1000) && getLocalTime(&timeinfo)) {
+    if (((millis() - log) > (60 * 1000) || readings.size() == 0) &&
+        getLocalTime(&timeinfo)) {
       time_t epoc = mktime(&timeinfo);
       epocTime.push_back((long)epoc);
       readings.push_back(temp);
