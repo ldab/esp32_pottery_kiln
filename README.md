@@ -1,7 +1,7 @@
 # kiln_controller
 Connected electric kiln controller -> esp8266, max31855, thermocouple type K, relay, contactor and energy meter. Including Kiln built plans.
 
-[![GitHub version](https://img.shields.io/github/release/ldab/kiln_controller.svg)](https://github.com/ldab/kiln_controller/releases/latest)
+[![GitHub version](https://img.shields.io/github/v/release/ldab/esp32_pottery_kiln?include_prereleases)](https://github.com/ldab/kiln_controller/releases/latest)
 ![Build Status](https://github.com/ldab/esp32_pottery_kiln/actions/workflows/workflow.yml/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/ldab/kiln_controller/blob/master/LICENSE)
 
