@@ -150,6 +150,16 @@ String processor(const String &var);
 String readFile(fs::FS &fs, const char *path);
 void writeFile(fs::FS &fs, const char *path, const char *message);
 
+typedef enum {
+  RED,
+  GREEN,
+  BLUE,
+  YELLOW,
+  WHITE,
+  PURPLE,
+  CYAN,
+} led_color_t;
+
 class CaptiveRequestHandler : public AsyncWebHandler
 {
   public:
@@ -169,6 +179,49 @@ class CaptiveRequestHandler : public AsyncWebHandler
 };
 
 void espRestart() { ESP.restart(); }
+
+void ledOff()
+{
+  digitalWrite(LED_R, HIGH);
+  digitalWrite(LED_G, HIGH);
+  digitalWrite(LED_B, HIGH);
+}
+
+void led(led_color_t color)
+{
+  ledOff();
+  switch (color) {
+  case RED:
+    digitalWrite(LED_R, LOW);
+    break;
+  case GREEN:
+    digitalWrite(LED_G, LOW);
+    break;
+  case BLUE:
+    digitalWrite(LED_B, LOW);
+    break;
+  case YELLOW:
+    digitalWrite(LED_R, LOW);
+    digitalWrite(LED_G, LOW);
+    break;
+  case WHITE:
+    digitalWrite(LED_R, LOW);
+    digitalWrite(LED_G, LOW);
+    digitalWrite(LED_B, LOW);
+    break;
+  case PURPLE:
+    digitalWrite(LED_R, LOW);
+    digitalWrite(LED_B, LOW);
+    break;
+  case CYAN:
+    digitalWrite(LED_G, LOW);
+    digitalWrite(LED_B, LOW);
+    break;
+
+  default:
+    break;
+  }
+}
 
 // Send notification to HA, max 32 bytes
 void notify(char *msg, size_t length)
@@ -484,6 +537,7 @@ void onFire(AsyncWebServerRequest *request)
     DBG("tTotal %dmin\n", tTotal);
 
     info = "Firing 🔥 @" + String(segments[step][0]) + "°C";
+    led(PURPLE);
 
     printSegments();
     rampRate();
@@ -825,9 +879,7 @@ void pinInit()
   pinMode(LED_R, OUTPUT);
   pinMode(LED_G, OUTPUT);
   pinMode(LED_B, OUTPUT);
-  digitalWrite(LED_R, HIGH);
-  digitalWrite(LED_G, HIGH);
-  digitalWrite(LED_B, HIGH);
+  ledOff();
 }
 
 void onMqttConnect(bool sessionPresent) { DBG("Connected to MQTT.\n"); }
@@ -919,6 +971,7 @@ void setup()
 #endif
 
   pinInit();
+  led(RED);
 
   mqttReconnectTimer =
       xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0,
@@ -1062,6 +1115,8 @@ void setup()
 
     tempTimer.attach(2, getTemp);
     sendTimer.attach_ms(10000L, sendData);
+
+    led(GREEN);
 
     // https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/ResetReason/ResetReason.ino
     esp_reset_reason_t reset_reason = esp_reset_reason();
