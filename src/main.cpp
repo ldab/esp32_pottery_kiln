@@ -1019,6 +1019,11 @@ void setup()
       request->send_P(200, "text/html", HTTP_INFO, processor);
     });
 
+    server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
+      request->redirect("/");
+      restart.once_ms(1000, espRestart);
+    });
+
     server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send_P(200, "text/html", HTTP_UPDATE, processor);
     });
