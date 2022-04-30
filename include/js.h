@@ -102,6 +102,11 @@ if (!!window.EventSource) {
     plotTemperature(parseFloat(e.data));
   }, false);
 
+  source.addEventListener('KW', function(e) {
+    // console.log("KW", e.data);
+    document.getElementById("KW").innerHTML = e.data;
+  }, false);
+
   source.addEventListener('display', function(e) {
     document.getElementById("display").innerHTML = e.data;
   }, false);

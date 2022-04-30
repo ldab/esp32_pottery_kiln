@@ -107,9 +107,10 @@ float tInt;
 float currentSetpoint = -9999;
 std::vector<float> readings;
 std::vector<long> epocTime;
-volatile float instPower;
-volatile float energy = 0;
 volatile float current;
+volatile uint32_t instPower;
+volatile uint32_t energy = 0;
+volatile uint32_t pulseInterval;
 
 // Control variables
 volatile uint32_t energyMillis = 0;
@@ -596,12 +597,14 @@ void sendData()
   StaticJsonDocument<192> doc;
   char payload[192];
 
+  current          = (instPower / 1000.0f) / 230.0f;
+
   JsonObject feeds = doc.createNestedObject("feeds");
   feeds["T"]       = temp;
   feeds["I"]       = current;
-  feeds["P"]       = instPower;
+  feeds["P"]       = instPower / 1000.0f;
   feeds["E"]       = energy;
-  feeds["$"]       = energy * COSTKWH;
+  feeds["$"]       = energy / 1000.0f * COSTKWH;
   feeds["Tint"]    = tInt;
   feeds["St"]      = currentSetpoint;
   feeds["Step"]    = step;
@@ -676,40 +679,33 @@ void IRAM_ATTR readPower()
   if (energy == 0) {
     // We don't know the time difference between pulse, reset
     // TODO get from cloud in case MCU reset
-    energy       = 1 / 1000.0f;
+    energy       = 1;
     current      = 0;
     instPower    = 0;
 
     energyMillis = millis();
   } else {
-    volatile uint32_t pulseInterval = millis() - energyMillis;
+    pulseInterval = millis() - energyMillis;
 
     if (pulseInterval < 100) { // 10*sqrt(2) Amps =~ 1106.8ms
       // DBG("DEBOUNCE");
       return;
     }
 
-    energy += 1 / 1000.0f;                             // each pulse is 1Wh
-    instPower    = (3600) / (pulseInterval / 1000.0f); // 1Wh = 3600J
-    current      = instPower / 230.0f;
+    energy++;                         // each pulse is 0,5Wh
+    instPower = 7200 * pulseInterval; // 1Wh = 3600J calculate in mW avoid float
 
     energyMillis = millis();
   }
 
   volatile static bool problem = false;
-  if (!digitalRead(RELAY)) {
+  if (digitalRead(RELAY)) {
     if (problem == true) {
-      char shortError[32];
-      sprintf(shortError, "I = %.1fA P = %.1fW", current, instPower);
-      notify(shortError, strlen(shortError));
+      // notify((char *)"shortError", strlen("shortError"));
     }
-
     problem = true;
   } else
     problem = false;
-
-  DBG("Current: %.1fA, Power: %.1fW, Energy: %.1fKWh\n", current, instPower,
-      energy);
 }
 
 void getTemp()
@@ -747,8 +743,6 @@ void getTemp()
   } else {
     static uint32_t log = millis();
     tErr                = false;
-    DBG("T: %.02fdegC\n", temp);
-
     char msg[8];
     sprintf(msg, "%.01f", temp);
 
@@ -763,9 +757,10 @@ void getTemp()
     }
 
     char instPowerString[8];
-    sprintf(instPowerString, "%.01f", instPower);
+    sprintf(instPowerString, "%.01f", instPower / 1000.0f);
     events.send(msg, "temperature");
     events.send(instPowerString, "KW");
+    DBG("T: %sdegC P: %sW\n", msg, instPowerString);
   }
 }
 
@@ -871,7 +866,7 @@ void rampRate()
 void pinInit()
 {
   pinMode(POWER, INPUT);
-  // attachInterrupt(POWER, readPower, FALLING); //internal SPI on PICO
+  attachInterrupt(POWER, readPower, FALLING); // internal SPI on PICO
 
   pinMode(RELAY, OUTPUT);
   digitalWrite(RELAY, LOW);
