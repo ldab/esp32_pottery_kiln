@@ -107,9 +107,10 @@ float tInt;
 float currentSetpoint = -9999;
 std::vector<float> readings;
 std::vector<long> epocTime;
-volatile float instPower;
-volatile float energy = 0;
 volatile float current;
+volatile uint32_t instPower;
+volatile uint32_t energy = 0;
+volatile uint32_t pulseInterval;
 
 // Control variables
 volatile uint32_t energyMillis = 0;
@@ -150,6 +151,16 @@ String processor(const String &var);
 String readFile(fs::FS &fs, const char *path);
 void writeFile(fs::FS &fs, const char *path, const char *message);
 
+typedef enum {
+  RED,
+  GREEN,
+  BLUE,
+  YELLOW,
+  WHITE,
+  PURPLE,
+  CYAN,
+} led_color_t;
+
 class CaptiveRequestHandler : public AsyncWebHandler
 {
   public:
@@ -169,6 +180,49 @@ class CaptiveRequestHandler : public AsyncWebHandler
 };
 
 void espRestart() { ESP.restart(); }
+
+void ledOff()
+{
+  digitalWrite(LED_R, HIGH);
+  digitalWrite(LED_G, HIGH);
+  digitalWrite(LED_B, HIGH);
+}
+
+void led(led_color_t color)
+{
+  ledOff();
+  switch (color) {
+  case RED:
+    digitalWrite(LED_R, LOW);
+    break;
+  case GREEN:
+    digitalWrite(LED_G, LOW);
+    break;
+  case BLUE:
+    digitalWrite(LED_B, LOW);
+    break;
+  case YELLOW:
+    digitalWrite(LED_R, LOW);
+    digitalWrite(LED_G, LOW);
+    break;
+  case WHITE:
+    digitalWrite(LED_R, LOW);
+    digitalWrite(LED_G, LOW);
+    digitalWrite(LED_B, LOW);
+    break;
+  case PURPLE:
+    digitalWrite(LED_R, LOW);
+    digitalWrite(LED_B, LOW);
+    break;
+  case CYAN:
+    digitalWrite(LED_G, LOW);
+    digitalWrite(LED_B, LOW);
+    break;
+
+  default:
+    break;
+  }
+}
 
 // Send notification to HA, max 32 bytes
 void notify(char *msg, size_t length)
@@ -275,7 +329,9 @@ String processor(const String &var)
   if (var == "FW_VER")
     return String(FIRMWARE_VERSION);
   if (var == "SDK_VER")
-    return String(esp_get_idf_version());
+    return String(ESP_ARDUINO_VERSION_MAJOR) + "." +
+           String(ESP_ARDUINO_VERSION_MINOR) + "." +
+           String(ESP_ARDUINO_VERSION_PATCH);
   if (var == "ABOUT_DATE") {
     String ret = String(__DATE__) + " " + String(__TIME__);
     return ret;
@@ -482,6 +538,7 @@ void onFire(AsyncWebServerRequest *request)
     DBG("tTotal %dmin\n", tTotal);
 
     info = "Firing 🔥 @" + String(segments[step][0]) + "°C";
+    led(PURPLE);
 
     printSegments();
     rampRate();
@@ -540,12 +597,14 @@ void sendData()
   StaticJsonDocument<192> doc;
   char payload[192];
 
+  current          = (instPower / 1000.0f) / 230.0f;
+
   JsonObject feeds = doc.createNestedObject("feeds");
   feeds["T"]       = temp;
   feeds["I"]       = current;
-  feeds["P"]       = instPower;
+  feeds["P"]       = instPower / 1000.0f;
   feeds["E"]       = energy;
-  feeds["$"]       = energy * COSTKWH;
+  feeds["$"]       = energy / 1000.0f * COSTKWH;
   feeds["Tint"]    = tInt;
   feeds["St"]      = currentSetpoint;
   feeds["Step"]    = step;
@@ -620,40 +679,33 @@ void IRAM_ATTR readPower()
   if (energy == 0) {
     // We don't know the time difference between pulse, reset
     // TODO get from cloud in case MCU reset
-    energy       = 1 / 1000.0f;
+    energy       = 1;
     current      = 0;
     instPower    = 0;
 
     energyMillis = millis();
   } else {
-    volatile uint32_t pulseInterval = millis() - energyMillis;
+    pulseInterval = millis() - energyMillis;
 
     if (pulseInterval < 100) { // 10*sqrt(2) Amps =~ 1106.8ms
       // DBG("DEBOUNCE");
       return;
     }
 
-    energy += 1 / 1000.0f;                             // each pulse is 1Wh
-    instPower    = (3600) / (pulseInterval / 1000.0f); // 1Wh = 3600J
-    current      = instPower / 230.0f;
+    energy++;                         // each pulse is 0,5Wh
+    instPower = 7200 * pulseInterval; // 1Wh = 3600J calculate in mW avoid float
 
     energyMillis = millis();
   }
 
   volatile static bool problem = false;
-  if (!digitalRead(RELAY)) {
+  if (digitalRead(RELAY)) {
     if (problem == true) {
-      char shortError[32];
-      sprintf(shortError, "I = %.1fA P = %.1fW", current, instPower);
-      notify(shortError, strlen(shortError));
+      // notify((char *)"shortError", strlen("shortError"));
     }
-
     problem = true;
   } else
     problem = false;
-
-  DBG("Current: %.1fA, Power: %.1fW, Energy: %.1fKWh\n", current, instPower,
-      energy);
 }
 
 void getTemp()
@@ -691,13 +743,12 @@ void getTemp()
   } else {
     static uint32_t log = millis();
     tErr                = false;
-    DBG("T: %.02fdegC\n", temp);
-
     char msg[8];
     sprintf(msg, "%.01f", temp);
 
     struct tm timeinfo;
-    if ((millis() - log) > (60 * 1000) && getLocalTime(&timeinfo)) {
+    if (((millis() - log) > (60 * 1000) || readings.size() == 0) &&
+        getLocalTime(&timeinfo)) {
       time_t epoc = mktime(&timeinfo);
       epocTime.push_back((long)epoc);
       readings.push_back(temp);
@@ -706,9 +757,10 @@ void getTemp()
     }
 
     char instPowerString[8];
-    sprintf(instPowerString, "%.01f", instPower);
+    sprintf(instPowerString, "%.01f", instPower / 1000.0f);
     events.send(msg, "temperature");
     events.send(instPowerString, "KW");
+    DBG("T: %sdegC P: %sW\n", msg, instPowerString);
   }
 }
 
@@ -814,7 +866,7 @@ void rampRate()
 void pinInit()
 {
   pinMode(POWER, INPUT);
-  // attachInterrupt(POWER, readPower, FALLING); //internal SPI on PICO
+  attachInterrupt(POWER, readPower, FALLING); // internal SPI on PICO
 
   pinMode(RELAY, OUTPUT);
   digitalWrite(RELAY, LOW);
@@ -822,9 +874,7 @@ void pinInit()
   pinMode(LED_R, OUTPUT);
   pinMode(LED_G, OUTPUT);
   pinMode(LED_B, OUTPUT);
-  digitalWrite(LED_R, HIGH);
-  digitalWrite(LED_G, HIGH);
-  digitalWrite(LED_B, HIGH);
+  ledOff();
 }
 
 void onMqttConnect(bool sessionPresent) { DBG("Connected to MQTT.\n"); }
@@ -916,6 +966,7 @@ void setup()
 #endif
 
   pinInit();
+  led(RED);
 
   mqttReconnectTimer =
       xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0,
@@ -1017,6 +1068,11 @@ void setup()
       request->send_P(200, "text/html", HTTP_INFO, processor);
     });
 
+    server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
+      request->redirect("/");
+      restart.once_ms(1000, espRestart);
+    });
+
     server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send_P(200, "text/html", HTTP_UPDATE, processor);
     });
@@ -1054,6 +1110,8 @@ void setup()
 
     tempTimer.attach(2, getTemp);
     sendTimer.attach_ms(10000L, sendData);
+
+    led(GREEN);
 
     // https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/ResetReason/ResetReason.ino
     esp_reset_reason_t reset_reason = esp_reset_reason();

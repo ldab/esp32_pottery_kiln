@@ -50,15 +50,14 @@ const char HTTP_INFO[] PROGMEM = R"rawliteral(
       <dl>
         <dt>Firmware Version</dt>
         <dd>%FW_VER%</dd>
-        <dt>IDF SDK</dt>
+        <dt>Arduino version</dt>
         <dd>%SDK_VER%</dd>
         <dt>Build Date</dt>
         <dd>%ABOUT_DATE%</dd>
       </dl>
       <form action="/update" method="get"><button>Update</button></form><br>
       <hr><br><br>
-      <form action="/erase" method="get"><button class="D">Erase WiFi Config</button></form><br>
-      <p>Github <a href="https://github.com/tzapu/WiFiManager">https://github.com/tzapu/WiFiManager</a>.</p>
+      <form action="/reset" method="get"><button class="D">Reset</button></form><br>
     </div>
   </body>
 
