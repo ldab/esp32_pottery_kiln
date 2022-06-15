@@ -575,7 +575,7 @@ void onFire(String input)
   // TODO publish retain and account for hold
   if (temp > segments[3][0])
     step = 3;
-  else if (temp > segments[1][0])
+  else if (temp > segments[2][0])
     step = 3;
   else if (temp > segments[1][0])
     step = 2;
