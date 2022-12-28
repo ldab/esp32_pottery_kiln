@@ -18,12 +18,12 @@ const char HTTP_CONFIG[] PROGMEM = R"rawliteral(
     <div class="content">
       <div class="card-grid">
         <div class="card">
-          <form action="/" method="POST">
+          <form action="/config" method="POST">
             <p>
               <label for="ssid">SSID</label>
-              <input type="text" id ="ssid" name="ssid"><br>
+              <input type="text" id ="ssid" name="ssid" value=%HTML_CONFIG_SSID%><br>
               <label for="pass">Password</label>
-              <input type="text" id ="pass" name="pass"><br>
+              <input type="text" id ="pass" name="pass" value=************><br>
               <label for="server">MQTT Server</label>
               <input type="text" id ="server" name="server" value="io.adafruit.com"><br>
               <label for="user">MQTT Username</label>
