@@ -291,6 +291,8 @@ String processor(const String &var)
       ret = "<strong> Not Connected</ strong>";
     return ret;
   }
+  if (var == "HTML_CONFIG_SSID")
+    return WiFi.SSID();
   if (var == "UPTIME") {
     String ret = String(millis() / 1000 / 60);
     ret += " min ";
@@ -360,9 +362,9 @@ String processor(const String &var)
   return String();
 }
 
-void captiveServer()
+void configServer()
 {
-  server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
+  server.on("/config", HTTP_POST, [](AsyncWebServerRequest *request) {
     int params = request->params();
     StaticJsonDocument<192> doc;
     char output[192] = {'\0'};
@@ -974,6 +976,7 @@ void setup()
 
   WiFi.mode(WIFI_STA);
   WiFi.onEvent(WiFiEvent);
+  WiFi.setHostname("kiln");
   WiFi.begin();
 
   // Initialize SPIFFS
@@ -992,7 +995,7 @@ void setup()
       WiFi.waitForConnectResult() == WL_NO_SSID_AVAIL) { //~ 100 * 100ms
     DBG("WiFi Failed!: %u\n", WiFi.status());
 
-    captiveServer();
+    configServer();
 
     WiFi.softAP("myKiln");
 
@@ -1063,6 +1066,8 @@ void setup()
     server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send_P(200, "text/html", HTTP_CONFIG, processor);
     });
+
+    configServer();
 
     server.on("/info", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send_P(200, "text/html", HTTP_INFO, processor);
