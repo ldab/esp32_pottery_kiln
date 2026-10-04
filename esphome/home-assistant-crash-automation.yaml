@@ -1,0 +1,12 @@
+- id: pottery_kiln_crash_notification
+  alias: Pottery kiln controller crash notification
+  triggers:
+    - trigger: event
+      event_type: esphome.kiln_crash
+  actions:
+    - action: persistent_notification.create
+      data:
+        title: Kiln controller restarted after a fault
+        message: >-
+          {{ trigger.event.data.device }} restarted because of
+          {{ trigger.event.data.reset_reason }}.

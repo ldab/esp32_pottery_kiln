@@ -1,6 +1,42 @@
 # kiln_controller
 Connected electric kiln controller -> esp32, max31855, thermocouple type K, relay, contactor and energy meter. Including Kiln built plans.
 
+## ESPHome firmware
+
+An ESPHome configuration is available in [`esphome/kiln.yaml`](esphome/kiln.yaml). It targets the ESP32-WROOM-32 shown in the schematic and retains the four-stage ramp/hold firing schedule, 5 °C relay differential, 5.53 second contactor control cadence, controlled cooling, RGB status LED, and S0 energy pulse measurement using ESPHome's native `pulse_meter`. MQTT, Papertrail, and the old browser graph are not used by this configuration.
+
+The ESPHome web server provides the firing profile number controls and Start, Stop, and Clear Fault buttons. Wi-Fi provisioning is handled by ESPHome's captive portal. It is a state control page; network credentials and firmware settings remain in the YAML/secrets file.
+
+### Install
+
+1. Copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` and replace its sample credentials. Generate a private API key with `openssl rand -base64 32`.
+2. Install ESPHome 2026.9 or newer and run `esphome run esphome/kiln.yaml`.
+3. After Wi-Fi setup, open `http://pottery-kiln.local/` or the ESP32's IP address. The HTTP page uses the username and password in `secrets.yaml`.
+4. In the web page or Home Assistant, set all four target/rate/hold groups and press **Start Kiln Firing**. The target temperatures must be nondecreasing; the final target is limited to 1260 °C.
+
+With no saved Wi-Fi credentials, connect to the `Kiln Fallback` access point and use its captive portal to configure the network. Profile parameters are saved as ESPHome number states. An interrupted or restarted firing does not resume automatically; the relay starts off and a new firing must be started manually.
+
+### Hardware pins
+
+| Schematic signal | ESP32 GPIO | ESPHome use |
+| --- | ---: | --- |
+| gRLY | 16 | Contactor relay output, active high, always off at boot |
+| S0+ | 17 | Energy meter pulse input |
+| MAX31855 CS | 22 | Thermocouple converter chip select |
+| MAX31855 MISO/SO | 21 | Thermocouple converter data |
+| MAX31855 SCK | 23 | Thermocouple converter clock |
+| LED_R / LED_G / LED_B | 25 / 26 / 27 | Active-low RGB status indicator |
+
+GPIO32/33 are the schematic's SDA/SCL connections and are not used by the current firmware. The energy calculation assumes the existing firmware's value of 0.5 Wh per S0 pulse.
+
+### MAX31855 and high-temperature handling
+
+The MAX31855K supports K-type measurements up to 1350 °C, so the project's 1260 °C profile limit is within its stated range. Although the schematic/BOM list L1/L2 ferrite beads, the assembled hardware has solder bridges at those positions; C7 (100 nF in the schematic) is also unpopulated. The MAX31855 inputs therefore have no added series ferrite or differential capacitor filtering, which can increase noise sensitivity. The original firmware's `Ignore SCG fault` behavior is retained by the small local ESPHome sensor component in `esphome/components/max31855_scg/`: it accepts a short-to-ground flag by itself, while an open thermocouple, short to VCC, or unreadable SPI data yields an invalid temperature and latches the heater off. This tolerance preserves the kiln workaround, but a real thermocouple short to ground can also make its reading unreliable. The 1300 °C firmware cutoff is a software limit and does not replace an independent kiln over-temperature cutout.
+
+### Remote crash reporting
+
+ESPHome's native API logger automatically retains warm-reset crash backtraces and reports them after the device reconnects. ESPHome CLI/Device Builder can decode the trace with the debug symbols from the matching firmware build. The configuration also exposes the last reset reason to Home Assistant and sends `esphome.kiln_crash` after panic, watchdog, brownout, or CPU lock-up resets. In the ESPHome integration settings, allow this device to perform Home Assistant actions. Then add [`home-assistant-crash-automation.yaml`](esphome/home-assistant-crash-automation.yaml) to send a persistent notification. See [ESPHome crash troubleshooting](https://esphome.io/guides/troubleshooting/) and the [MAX31855 component](https://esphome.io/components/sensor/max31855/).
+
 [![GitHub version](https://img.shields.io/github/v/release/ldab/esp32_pottery_kiln?include_prereleases)](https://github.com/ldab/kiln_controller/releases/latest)
 ![Build Status](https://github.com/ldab/esp32_pottery_kiln/actions/workflows/workflow.yml/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/ldab/kiln_controller/blob/master/LICENSE)

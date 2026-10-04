@@ -48,3 +48,9 @@ PCB/iot_plant_watering_sensor_esp32/iot_plant_watering_sensor_esp32-cache.lib
 fp-lib-table
 sym-lib-table
 .pio/build/project.checksum
+
+# esphome
+esphome/secrets.yaml
+esphome/components/max31855_scg/__pycache__/__init__.cpython-313.pyc
+esphome/components/max31855_scg/__pycache__/sensor.cpython-313.pyc
+esphome/components/max31855_scg/__init__.py

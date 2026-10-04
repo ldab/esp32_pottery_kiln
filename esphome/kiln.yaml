@@ -1,0 +1,709 @@
+esphome:
+  name: kiln
+  friendly_name: kiln
+  on_boot:
+    priority: -100
+    then:
+      - text_sensor.template.publish:
+          id: profile_status
+          state: "Idle"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+  baud_rate: 115200
+
+api:
+  encryption:
+    key: !secret kiln__encryption_key
+  on_client_connected:
+    then:
+      # Report once, and only after Home Assistant (rather than a log viewer)
+      # has subscribed to device states.
+      - if:
+          condition:
+            and:
+              - lambda: return !id(boot_event_reported);
+              - api.connected:
+                  state_subscription_only: true
+          then:
+            - lambda: id(boot_event_reported) = true;
+            - if:
+                condition:
+                  lambda: |-
+                    const std::string &reason = id(kiln_reset_reason).state;
+                    return reason == "exception/panic" ||
+                           reason == "interrupt watchdog" ||
+                           reason == "task watchdog" ||
+                           reason == "other watchdogs" ||
+                           reason == "brownout" ||
+                           reason == "power glitch detected" ||
+                           reason == "CPU lock up";
+                then:
+                  - homeassistant.event:
+                      event: esphome.kiln_crash
+                      data:
+                        device: pottery-kiln
+                        reset_reason: !lambda return id(kiln_reset_reason).state;
+                else:
+                  - homeassistant.event:
+                      event: esphome.kiln_boot
+                      data:
+                        device: pottery-kiln
+                        reset_reason: !lambda return id(kiln_reset_reason).state;
+
+ota:
+  - platform: esphome
+    encryption:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: kiln Fallback Hotspot
+
+captive_portal:
+
+  
+web_server:
+  port: 80
+  version: 3
+  local: true
+  log: true
+  sorting_groups:
+    - id: kiln_profile_settings
+      name: "Profile Settings"
+      sorting_weight: 10
+    - id: kiln_firing_controls
+      name: "Firing Controls"
+      sorting_weight: 20
+    - id: kiln_status_group
+      name: "Kiln Status"
+      sorting_weight: 30
+    - id: kiln_diagnostics_group
+      name: "Diagnostics"
+      sorting_weight: 100
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [max31855_scg]
+
+spi:
+  id: kiln_spi
+  clk_pin: GPIO23  # SCK on the MAX31855
+  miso_pin: GPIO21 # SO/MISO on the MAX31855
+
+globals:
+  - id: profile_running
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: profile_stage
+    type: int
+    restore_value: no
+    initial_value: "-1"
+  - id: profile_holding
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: hold_started_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: current_setpoint
+    type: float
+    restore_value: no
+    initial_value: "0.0f"
+  - id: last_tick_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: last_control_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: profile_fault_latched
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: boot_event_reported
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: profile_status_value
+    type: std::string
+    restore_value: no
+    initial_value: '"Idle"'
+  - id: energy_pulses
+    type: uint32_t
+    restore_value: yes
+    initial_value: "0"
+  - id: last_energy_pulse_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: power_watts
+    type: float
+    restore_value: no
+    initial_value: "0.0f"
+
+sensor:
+  - platform: max31855_scg
+    id: kiln_temperature
+    name: "Kiln Temperature"
+    spi_id: kiln_spi
+    cs_pin: GPIO22
+    update_interval: 1s
+    web_server:
+      sorting_group_id: kiln_status_group
+      sorting_weight: 10
+    reference_temperature:
+      id: controller_temperature
+      name: "MAX31855 Board Temperature"
+      web_server:
+        sorting_group_id: kiln_diagnostics_group
+        sorting_weight: 10
+
+  - platform: template
+    id: kiln_setpoint_sensor
+    name: "Kiln Setpoint"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 1s
+    web_server:
+      sorting_group_id: kiln_status_group
+      sorting_weight: 20
+    lambda: |-
+      if (id(profile_running)) return id(current_setpoint);
+      return 0.0f;
+
+  - platform: template
+    id: energy_sensor
+    name: "Kiln Energy"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    update_interval: 10s
+    web_server:
+      sorting_group_id: kiln_status_group
+      sorting_weight: 50
+    lambda: return id(energy_pulses) * 0.0005f; // 0.5 Wh/S0 pulse
+
+  - platform: template
+    id: power_sensor
+    name: "Kiln Power"
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 1s
+    web_server:
+      sorting_group_id: kiln_status_group
+      sorting_weight: 40
+    lambda: |-
+      if (id(last_energy_pulse_ms) == 0 || millis() - id(last_energy_pulse_ms) > 10000) {
+        id(power_watts) = 0.0f;
+      }
+      return id(power_watts);
+
+  - platform: template
+    id: profile_stage_sensor
+    name: "Firing Stage"
+    accuracy_decimals: 0
+    update_interval: 1s
+    web_server:
+      sorting_group_id: kiln_status_group
+      sorting_weight: 30
+    lambda: return id(profile_stage);
+
+  - platform: debug
+    free:
+      name: "Free Heap"
+      web_server:
+        sorting_group_id: kiln_diagnostics_group
+        sorting_weight: 20
+    loop_time:
+      name: "Main Loop Time"
+      web_server:
+        sorting_group_id: kiln_diagnostics_group
+        sorting_weight: 30
+
+binary_sensor:
+  - platform: gpio
+    id: s0_input
+    name: "Energy Meter S0 Pulse"
+    internal: true
+    pin:
+      number: GPIO17
+      mode: INPUT
+      inverted: true
+    filters:
+      - delayed_on: 5ms
+    on_press:
+      then:
+        - lambda: |-
+            const uint32_t now = millis();
+            const uint32_t previous = id(last_energy_pulse_ms);
+            if (previous != 0) {
+              const uint32_t elapsed = now - previous;
+              if (elapsed < 100) return; // debounce, matching the original S0 reader
+              id(power_watts) = 1800000.0f / elapsed; // 0.5 Wh per pulse
+            }
+            id(energy_pulses)++;
+            id(last_energy_pulse_ms) = now;
+
+number:
+  - platform: template
+    id: preheat_target
+    name: "Preheat Target"
+    unit_of_measurement: "°C"
+    min_value: 1
+    max_value: 250
+    step: 1
+    initial_value: 100
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 10
+  - platform: template
+    id: preheat_rate
+    name: "Preheat Rate"
+    unit_of_measurement: "°C/h"
+    min_value: 1
+    max_value: 250
+    step: 1
+    initial_value: 100
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 20
+  - platform: template
+    id: preheat_hold
+    name: "Preheat Hold"
+    unit_of_measurement: min
+    min_value: 0
+    max_value: 3600
+    step: 1
+    initial_value: 15
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 30
+
+  - platform: template
+    id: step1_target
+    name: "Step 1 Target"
+    unit_of_measurement: "°C"
+    min_value: 1
+    max_value: 960
+    step: 1
+    initial_value: 100
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 40
+  - platform: template
+    id: step1_rate
+    name: "Step 1 Rate"
+    unit_of_measurement: "°C/h"
+    min_value: 1
+    max_value: 9999
+    step: 1
+    initial_value: 250
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 50
+  - platform: template
+    id: step1_hold
+    name: "Step 1 Hold"
+    unit_of_measurement: min
+    min_value: 0
+    max_value: 3600
+    step: 1
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 60
+
+  - platform: template
+    id: step2_target
+    name: "Step 2 Target"
+    unit_of_measurement: "°C"
+    min_value: 1
+    max_value: 1240
+    step: 1
+    initial_value: 1140
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 70
+  - platform: template
+    id: step2_rate
+    name: "Step 2 Rate"
+    unit_of_measurement: "°C/h"
+    min_value: 1
+    max_value: 9999
+    step: 1
+    initial_value: 250
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 80
+  - platform: template
+    id: step2_hold
+    name: "Step 2 Hold"
+    unit_of_measurement: min
+    min_value: 0
+    max_value: 3600
+    step: 1
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 90
+
+  - platform: template
+    id: final_target
+    name: "Final Target"
+    unit_of_measurement: "°C"
+    min_value: 1
+    max_value: 1260
+    step: 1
+    initial_value: 1240
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 100
+  - platform: template
+    id: final_rate
+    name: "Final Rate"
+    unit_of_measurement: "°C/h"
+    min_value: 1
+    max_value: 9999
+    step: 1
+    initial_value: 60
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 110
+  - platform: template
+    id: final_hold
+    name: "Final Hold"
+    unit_of_measurement: min
+    min_value: 0
+    max_value: 3600
+    step: 1
+    initial_value: 15
+    optimistic: true
+    restore_value: true
+    mode: box
+    web_server:
+      sorting_group_id: kiln_profile_settings
+      sorting_weight: 120
+
+button:
+  - platform: template
+    name: "Start Kiln Firing"
+    web_server:
+      sorting_group_id: kiln_firing_controls
+      sorting_weight: 20
+    on_press:
+      then:
+        - lambda: |-
+            if (id(profile_fault_latched)) {
+              id(profile_status_value) = "Fault latched; clear the fault first";
+              id(profile_status).publish_state(id(profile_status_value));
+              return;
+            }
+            if (!id(kiln_temperature).has_state() || isnan(id(kiln_temperature).state)) {
+              id(profile_status_value) = "Waiting for a valid thermocouple reading";
+              id(profile_status).publish_state(id(profile_status_value));
+              return;
+            }
+            if (id(profile_running)) {
+              id(profile_status_value) = "A firing profile is already running";
+              id(profile_status).publish_state(id(profile_status_value));
+              return;
+            }
+            if (id(kiln_temperature).state >= 1300.0f) {
+              id(profile_fault_latched) = true;
+              id(kiln_relay).turn_off();
+              id(profile_status_value) = "Over-temperature fault";
+              id(profile_status).publish_state(id(profile_status_value));
+              return;
+            }
+            const float t0 = id(preheat_target).state;
+            const float t1 = id(step1_target).state;
+            const float t2 = id(step2_target).state;
+            const float t3 = id(final_target).state;
+            if (t1 < t0 || t2 < t1 || t3 < t2 || t3 > 1260.0f) {
+              id(profile_status_value) = "Invalid profile: targets must increase through 1260 C";
+              id(profile_status).publish_state(id(profile_status_value));
+              return;
+            }
+            id(profile_running) = true;
+            id(profile_stage) = 0;
+            id(profile_holding) = false;
+            id(hold_started_ms) = 0;
+            id(current_setpoint) = id(kiln_temperature).state;
+            id(last_tick_ms) = millis();
+            id(last_control_ms) = 0;
+            id(profile_status_value) = "Firing: Preheat";
+            id(profile_status).publish_state(id(profile_status_value));
+
+  - platform: template
+    name: "Stop Kiln Firing"
+    web_server:
+      sorting_group_id: kiln_firing_controls
+      sorting_weight: 30
+    on_press:
+      then:
+        - switch.turn_off: kiln_relay
+        - lambda: |-
+            id(profile_running) = false;
+            id(profile_holding) = false;
+            id(profile_stage) = -1;
+            id(current_setpoint) = 0.0f;
+            id(profile_status_value) = "Stopped";
+            id(profile_status).publish_state(id(profile_status_value));
+
+  - platform: template
+    name: "Clear Kiln Fault"
+    web_server:
+      sorting_group_id: kiln_firing_controls
+      sorting_weight: 40
+    on_press:
+      then:
+        - lambda: |-
+            if (id(kiln_temperature).has_state() &&
+                !isnan(id(kiln_temperature).state) &&
+                id(kiln_temperature).state < 1270.0f) {
+              id(profile_fault_latched) = false;
+              id(profile_status_value) = "Idle";
+            } else {
+              id(profile_status_value) = "Cannot clear: require healthy sensor below 1270 C";
+            }
+            id(profile_status).publish_state(id(profile_status_value));
+
+output:
+  # The schematic's RGB indicator is active low.
+  - platform: gpio
+    id: led_red
+    pin:
+      number: GPIO25
+      inverted: true
+  - platform: gpio
+    id: led_green
+    pin:
+      number: GPIO26
+      inverted: true
+  - platform: gpio
+    id: led_blue
+    pin:
+      number: GPIO27
+      inverted: true
+
+switch:
+  - platform: gpio
+    id: kiln_relay
+    internal: true
+    name: "Kiln Contactor Relay"
+    pin: GPIO16
+    restore_mode: ALWAYS_OFF
+
+text_sensor:
+  - platform: template
+    id: profile_status
+    name: "Kiln Profile Status"
+    update_interval: never
+    web_server:
+      sorting_group_id: kiln_firing_controls
+      sorting_weight: 10
+    lambda: return id(profile_status_value);
+
+  - platform: debug
+    device:
+      name: "ESPHome Device Diagnostics"
+      web_server:
+        sorting_group_id: kiln_diagnostics_group
+        sorting_weight: 10
+    reset_reason:
+      id: kiln_reset_reason
+      name: "Last Reset Reason"
+      web_server:
+        sorting_group_id: kiln_diagnostics_group
+        sorting_weight: 40
+
+debug:
+  update_interval: 60s
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          const uint32_t elapsed_ms = now - id(last_tick_ms);
+          id(last_tick_ms) = now;
+
+          const bool sensor_ready = id(kiln_temperature).has_state();
+          const float temperature = sensor_ready ? id(kiln_temperature).state : NAN;
+
+          // A bad thermocouple or runaway temperature latches the output off.
+          if (sensor_ready && (isnan(temperature) || temperature >= 1300.0f)) {
+            id(kiln_relay).turn_off();
+            id(profile_running) = false;
+            id(profile_holding) = false;
+            id(profile_fault_latched) = true;
+            id(profile_status_value) = !isnan(temperature)
+                ? "Over-temperature fault"
+                : "Thermocouple fault";
+            id(profile_status).publish_state(id(profile_status_value));
+          }
+
+          if (!sensor_ready || isnan(temperature) || id(profile_fault_latched)) {
+            id(kiln_relay).turn_off();
+            id(led_red).turn_on();
+            id(led_green).turn_off();
+            id(led_blue).turn_off();
+            return;
+          }
+
+          auto target_for_stage = [&](int stage) -> float {
+            switch (stage) {
+              case 0: return id(preheat_target).state;
+              case 1: return id(step1_target).state;
+              case 2: return id(step2_target).state;
+              default: return id(final_target).state;
+            }
+          };
+          auto rate_for_stage = [&](int stage) -> float {
+            switch (stage) {
+              case 0: return id(preheat_rate).state;
+              case 1: return id(step1_rate).state;
+              case 2: return id(step2_rate).state;
+              default: return id(final_rate).state;
+            }
+          };
+          auto hold_for_stage = [&](int stage) -> uint32_t {
+            switch (stage) {
+              case 0: return (uint32_t) id(preheat_hold).state;
+              case 1: return (uint32_t) id(step1_hold).state;
+              case 2: return (uint32_t) id(step2_hold).state;
+              default: return (uint32_t) id(final_hold).state;
+            }
+          };
+
+          if (id(profile_running)) {
+            if (id(profile_stage) >= 4) {
+              // Preserve the legacy 83 C/hour controlled cool-down to 760 C.
+              id(current_setpoint) -= 83.0f * (elapsed_ms / 3600000.0f);
+              if (id(current_setpoint) <= 760.0f) {
+                id(kiln_relay).turn_off();
+                id(profile_running) = false;
+                id(current_setpoint) = 0.0f;
+                id(profile_status_value) = "Slow cooling complete";
+                id(profile_status).publish_state(id(profile_status_value));
+              }
+            } else {
+              const int stage = id(profile_stage);
+              const float target = target_for_stage(stage);
+              const uint32_t hold_minutes = hold_for_stage(stage);
+              if (id(profile_holding)) {
+                if (now - id(hold_started_ms) >= hold_minutes * 60000UL) {
+                  id(profile_holding) = false;
+                  id(profile_stage)++;
+                  if (id(profile_stage) >= 4) {
+                    id(profile_status_value) = "Slow cooling";
+                  } else if (id(profile_stage) == 3) {
+                    id(profile_status_value) = "Firing: Final";
+                  } else {
+                    id(profile_status_value) = "Firing: Step " + std::to_string(id(profile_stage));
+                  }
+                  id(profile_status).publish_state(id(profile_status_value));
+                }
+              } else if (temperature >= target) {
+                id(current_setpoint) = target;
+                if (hold_minutes > 0) {
+                  id(profile_holding) = true;
+                  id(hold_started_ms) = now;
+                  const char *stage_name = stage == 0 ? "Preheat" :
+                                           stage == 1 ? "Step 1" :
+                                           stage == 2 ? "Step 2" : "Final hold";
+                  id(profile_status_value) = std::string("Holding: ") + stage_name;
+                  id(profile_status).publish_state(id(profile_status_value));
+                } else {
+                  id(profile_stage)++;
+                  if (id(profile_stage) >= 4) {
+                    id(profile_status_value) = "Slow cooling";
+                  } else if (id(profile_stage) == 3) {
+                    id(profile_status_value) = "Firing: Final";
+                  } else {
+                    id(profile_status_value) = "Firing: Step " + std::to_string(id(profile_stage));
+                  }
+                  id(profile_status).publish_state(id(profile_status_value));
+                }
+              } else {
+                id(current_setpoint) += rate_for_stage(stage) * (elapsed_ms / 3600000.0f);
+                if (id(current_setpoint) > target) id(current_setpoint) = target;
+              }
+            }
+
+            // Keep the original contactor cadence and 5 C switching differential.
+            if (id(profile_running) && now - id(last_control_ms) >= 5530) {
+              id(last_control_ms) = now;
+              if (temperature < id(current_setpoint) - 5.0f) {
+                id(kiln_relay).turn_on();
+              } else {
+                id(kiln_relay).turn_off();
+              }
+            }
+          } else {
+            id(kiln_relay).turn_off();
+          }
+
+          if (id(profile_running) && id(profile_stage) >= 4) {
+            id(led_red).turn_off();
+            id(led_green).turn_on();
+            id(led_blue).turn_off();
+          } else if (id(profile_running)) {
+            id(led_red).turn_on();
+            id(led_green).turn_off();
+            id(led_blue).turn_on();
+          } else {
+            id(led_red).turn_off();
+            id(led_green).turn_off();
+            id(led_blue).turn_on();
+          }
