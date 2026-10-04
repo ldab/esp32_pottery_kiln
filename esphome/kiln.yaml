@@ -4,6 +4,10 @@ esphome:
   on_boot:
     priority: -100
     then:
+      - pulse_meter.set_total_pulses:
+          id: s0_pulse_meter
+          value: !lambda return id(energy_pulses);
+      - lambda: id(s0_counter_ready) = true;
       - text_sensor.template.publish:
           id: profile_status
           state: "Idle"
@@ -144,14 +148,10 @@ globals:
     type: uint32_t
     restore_value: yes
     initial_value: "0"
-  - id: last_energy_pulse_ms
-    type: uint32_t
+  - id: s0_counter_ready
+    type: bool
     restore_value: no
-    initial_value: "0"
-  - id: power_watts
-    type: float
-    restore_value: no
-    initial_value: "0.0f"
+    initial_value: "false"
 
 sensor:
   - platform: max31855_scg
@@ -198,22 +198,39 @@ sensor:
       sorting_weight: 50
     lambda: return id(energy_pulses) * 0.0005f; // 0.5 Wh/S0 pulse
 
-  - platform: template
-    id: power_sensor
+  - platform: pulse_meter
+    id: s0_pulse_meter
     name: "Kiln Power"
+    pin:
+      number: GPIO17
+      mode: INPUT
+      inverted: true
     unit_of_measurement: "W"
     device_class: power
     state_class: measurement
     accuracy_decimals: 0
-    update_interval: 1s
+    internal_filter: 5ms
+    internal_filter_mode: PULSE
+    timeout: 10s
+    filters:
+      - multiply: 30.0 # 0.5 Wh per pulse, with pulse rate in pulses/min
     web_server:
       sorting_group_id: kiln_status_group
       sorting_weight: 40
-    lambda: |-
-      if (id(last_energy_pulse_ms) == 0 || millis() - id(last_energy_pulse_ms) > 10000) {
-        id(power_watts) = 0.0f;
-      }
-      return id(power_watts);
+    total:
+      id: s0_pulse_total
+      internal: true
+      accuracy_decimals: 0
+      state_class: total_increasing
+      on_value:
+        then:
+          - if:
+              condition:
+                lambda: return id(s0_counter_ready);
+              then:
+                - lambda: |-
+                    id(energy_pulses) = static_cast<uint32_t>(x + 0.5f);
+                    id(energy_sensor).publish_state(id(energy_pulses) * 0.0005f);
 
   - platform: template
     id: profile_stage_sensor
@@ -236,30 +253,6 @@ sensor:
       web_server:
         sorting_group_id: kiln_diagnostics_group
         sorting_weight: 30
-
-binary_sensor:
-  - platform: gpio
-    id: s0_input
-    name: "Energy Meter S0 Pulse"
-    internal: true
-    pin:
-      number: GPIO17
-      mode: INPUT
-      inverted: true
-    filters:
-      - delayed_on: 5ms
-    on_press:
-      then:
-        - lambda: |-
-            const uint32_t now = millis();
-            const uint32_t previous = id(last_energy_pulse_ms);
-            if (previous != 0) {
-              const uint32_t elapsed = now - previous;
-              if (elapsed < 100) return; // debounce, matching the original S0 reader
-              id(power_watts) = 1800000.0f / elapsed; // 0.5 Wh per pulse
-            }
-            id(energy_pulses)++;
-            id(last_energy_pulse_ms) = now;
 
 number:
   - platform: template
